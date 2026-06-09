@@ -6,8 +6,8 @@ import { COLLECTIONS } from '../src/constants.js';
 
 const EXPECTED_SYNC_ENABLED = {
   [COLLECTIONS.metricWeekOverrides]: false,
-  [COLLECTIONS.selectedScopeMask]: false,
-  [COLLECTIONS.fullMask]: false,
+  [COLLECTIONS.selectedScopeMask]: true,
+  [COLLECTIONS.fullMask]: true,
   [COLLECTIONS.generationRuns]: true
 };
 

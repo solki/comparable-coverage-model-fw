@@ -42,6 +42,28 @@ The app separates global and selected-scope values:
 
 The Domo runtime uses aggregate SQL for source reads, including Store x Metric x Fiscal Week weekly coverage records for weekly metric value, source data status, and weeks without source data checks. It does not load raw source dataset rows in Domo runtime.
 
+## Phase 2 L4L Comparison Visualization
+
+Phase 2 reads the existing Workflow output dataset through manifest alias `l4lComparisonFact`:
+
+`DomoDev | Phase 2 Metric | L4L Weekly Comparison Fact`
+
+After publishing the app manually, map alias `l4lComparisonFact` to this Domo dataset:
+
+`e5dffb5a-176f-4564-a147-c0d7311a6880`
+
+The app does not modify the Workflow, Magic ETL, DataFlow, source dataset, or AppDB for Phase 2. In Domo runtime, it can trigger the existing Workflow through manifest alias `prepareL4LFacts` with no start-node input parameters. The app polls the Workflow instance status and refreshes `l4lComparisonFact` after completion.
+
+If `domo.workflow` is unavailable in the runtime, the app shows this fallback instruction:
+
+`Run the Workflow manually in Domo, then click Refresh Results.`
+
+The Phase 2 visualization infers Store, Metric, and Period Lens from the output dataset. L4L ON uses `mask_include_flag = Y`; L4L OFF uses all rows in the prepared comparison fact dataset.
+
+The app reads `l4lComparisonFact` without a `fields=` whitelist because Domo card-level dataset mappings can expose a subset of field aliases. Optional display columns such as `comparable_week_slot` are shown when mapped and display `-` when absent.
+
+If Workflow start returns HTTP 500 from `/domo/workflow/v1/models/prepareL4LFacts/start`, the request reached Domo's Workflow service but no instance was created. Check the published app workflow mapping, Workflow enabled/published status, current user execute permission, and whether the Workflow can be started manually in Domo. The app displays the HTTP status, message, and Domo toe when available.
+
 ## Source Dataset
 
 After publishing the app manually, map the alias `sourceMetrics` to this Domo dataset:
@@ -91,6 +113,7 @@ Week 53 rows are shown in review when present, but are automatically excluded wi
 Before Domo dev/publish testing, manually map:
 
 - dataset alias `sourceMetrics`
+- dataset alias `l4lComparisonFact` for Phase 2 results
 - collection `ccm_metric_week_overrides`
 - collection `ccm_selected_scope_mask`
 - collection `ccm_full_mask` for future production output

@@ -154,10 +154,34 @@ Business Validation includes Comparable Week Records, Included Comparable Weeks,
 
 Technical Write Summary includes `generation_mode = SELECTED_SCOPE`, `output_collection = ccm_selected_scope_mask`, selected store, selected metric, selected period lens, Previous Mask Records Cleared, Mask Records Written, run id, and rebuild status.
 
+## Phase 2 L4L Result Calculation
+
+Phase 2 reads prepared comparison fact rows from alias `l4lComparisonFact`.
+
+In Domo runtime, the app can trigger `Prepare L4L Comparison Facts` through manifest alias `prepareL4LFacts` with an empty payload because the Workflow has no start-node input parameters.
+
+The app polls `domo.workflow.getInstance('prepareL4LFacts', instanceId)` and shows progress in the UI until the Workflow reaches `COMPLETED`, `FAILED`, or `CANCELED`. After `COMPLETED`, it refreshes rows from `l4lComparisonFact`.
+
+If `domo.workflow` is unavailable, users should run the Workflow manually in Domo, then click Refresh Results.
+
+For the selected coverage mode:
+
+- L4L ON filters to `mask_include_flag = Y`.
+- L4L OFF uses all prepared comparison rows.
+- Current Value is `SUM(source_value or 0)` where `comparison_side = current`.
+- Prior Value is `SUM(source_value or 0)` where `comparison_side = prior`.
+- Absolute Variance is Current Value minus Prior Value.
+- Variance % is `(Current - Prior) / ABS(Prior)` when Prior is non-zero.
+- If Prior is zero, Variance % displays `N/A` with status `PRIOR_ZERO` or `BOTH_ZERO`.
+- If current and prior included week counts differ and no prior-zero status applies, status is `WEEK_COUNT_MISMATCH`.
+
+The UI always shows L4L ON and L4L OFF side-by-side, plus the weeks excluded by comparable coverage.
+
 ## Write Safety
 
 - Do not run `domo publish` without explicit approval.
 - Do not modify the source dataset.
 - Do not create, delete, or update unrelated Domo objects.
 - AppDB writes are limited to approved project collections.
+- Do not modify Workflow, Magic ETL, or DataFlow definitions from the app.
 - Do not implement full generation, Workflow sync, or Magic ETL production orchestration in Phase 1.

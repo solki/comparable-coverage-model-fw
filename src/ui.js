@@ -7,6 +7,21 @@ import { profileSource } from './sourceDataService.js';
 import { buildValidationSummary } from './validation.js';
 import { getRuntimeLabel } from './domoClient.js';
 import { getPeriodPage } from './periodTable.js';
+import { L4L_COMPARISON_ALIAS, loadComparisonRows } from './comparisonDataService.js';
+import {
+  calculateComparisonSummary,
+  formatNumber,
+  formatPercentChange,
+  formatSignedNumber,
+  getExcludedWeeks,
+  getRowsForCoverageMode,
+  inferComparisonContext
+} from './l4lComparisonCalculator.js';
+import {
+  PREPARE_L4L_WORKFLOW,
+  getWorkflowTriggerSupport,
+  runPrepareL4LWorkflow
+} from './workflowService.js';
 import {
   computeGlobalDatasetOverview,
   computeSelectedScopeSummary,
@@ -46,7 +61,19 @@ export function createApp(root) {
     lastRun: null,
     pendingWrite: null,
     validationSummary: null,
-    rebuildProgress: null
+    rebuildProgress: null,
+    l4lRows: [],
+    l4lSource: 'none',
+    l4lValidation: { valid: true, missingFields: [] },
+    l4lDiagnostics: {
+      alias: L4L_COMPARISON_ALIAS,
+      mapped: false,
+      queryable: false,
+      message: 'L4L comparison data has not been queried yet.'
+    },
+    l4lComparableCoverageOn: true,
+    l4lMessage: 'No L4L comparison data is available. Run the Prepare L4L Comparison Facts Workflow first.',
+    workflowProgress: null
   };
 
   async function init() {
@@ -63,6 +90,8 @@ export function createApp(root) {
       state.selectedPeriodType = periods.rows[0]?.period_type || '';
       state.periodSource = periods.source;
       state.manualOverrides = await loadOverridesForSelection();
+      const l4lResult = await loadComparisonRows();
+      applyL4LResult(l4lResult);
       state.diagnostics = mergeDiagnostics(
         state.diagnostics,
         sourceResult.diagnostics,
@@ -102,6 +131,8 @@ export function createApp(root) {
           ${renderPeriodDefinitions()}
           ${renderGenerateMask()}
           ${renderValidationSummary()}
+          ${renderPrepareL4LWorkflowPanel()}
+          ${renderL4LComparisonVisualization()}
         </section>
         ${state.pendingWrite ? renderWriteConfirmation(state.pendingWrite) : ''}
       </main>
@@ -287,6 +318,276 @@ export function createApp(root) {
     `;
   }
 
+  function renderPrepareL4LWorkflowPanel() {
+    const support = getWorkflowTriggerSupport();
+    return `
+      <section class="panel panel-wide phase2-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Prepare L4L Comparison Facts</h2>
+            <p class="note">Workflow ${escapeHtml(PREPARE_L4L_WORKFLOW.version)} writes the output dataset used by this read-only visualization.</p>
+          </div>
+          <div class="button-row">
+            <button class="secondary" data-action="run-l4l-workflow" ${support.supported && !state.loading ? '' : 'disabled'}>Run Workflow and Refresh Results</button>
+            <button class="primary" data-action="refresh-l4l-results" ${state.loading ? 'disabled' : ''}>Refresh Results</button>
+          </div>
+        </div>
+        <div class="metric-grid">
+          ${metric('Workflow', PREPARE_L4L_WORKFLOW.name)}
+          ${metric('Workflow Alias', PREPARE_L4L_WORKFLOW.alias)}
+          ${metric('Version', PREPARE_L4L_WORKFLOW.version)}
+          ${metric('Start Inputs', 'None')}
+          ${metric('Output Dataset', PREPARE_L4L_WORKFLOW.outputDatasetName)}
+          ${metric('Dataset Alias', L4L_COMPARISON_ALIAS || 'l4lComparisonFact')}
+        </div>
+        ${support.supported ? '<p class="note">Automatic Workflow trigger is available in Domo runtime.</p>' : `<p class="note">${escapeHtml(support.manualInstruction)}</p>`}
+        <p class="note">${escapeHtml(support.reason)}</p>
+        ${renderWorkflowProgress()}
+      </section>
+    `;
+  }
+
+  function renderWorkflowProgress() {
+    const progress = state.workflowProgress;
+    if (!progress) return '';
+
+    const percent = Math.max(0, Math.min(100, Number(progress.percent) || 0));
+    const pollText = progress.maxPollAttempts
+      ? `Poll ${progress.attempt || 0} of ${progress.maxPollAttempts}`
+      : 'Starting';
+
+    return `
+      <div class="workflow-progress" role="status" aria-live="polite">
+        <div class="progress-heading">
+          <span>Workflow Status</span>
+          <strong>${escapeHtml(progress.status || 'STARTING')}</strong>
+        </div>
+        <div class="progress-track" aria-label="Workflow execution progress">
+          <div class="progress-fill" style="width: ${escapeAttribute(percent)}%;"></div>
+        </div>
+        <p class="note">${escapeHtml(pollText)}${progress.instanceId ? ` · Instance ${escapeHtml(progress.instanceId)}` : ''}</p>
+        ${progress.errorMessage ? `<p class="diagnostic-error">${escapeHtml(progress.errorMessage)}</p>` : ''}
+      </div>
+    `;
+  }
+
+  function renderL4LComparisonVisualization() {
+    const rows = state.l4lRows;
+    const validation = state.l4lValidation || { valid: true, missingFields: [] };
+
+    if (!rows.length) {
+      return `
+        <section class="panel panel-wide phase2-panel">
+          <div class="panel-heading">
+            <h2>Store Performance — L4L Comparison</h2>
+          </div>
+          ${emptyState('No L4L comparison data is available. Run the Prepare L4L Comparison Facts Workflow first.')}
+          ${renderL4LDiagnostics()}
+        </section>
+      `;
+    }
+
+    if (!validation.valid) {
+      return `
+        <section class="panel panel-wide phase2-panel">
+          <div class="panel-heading">
+            <h2>Store Performance — L4L Comparison</h2>
+            <button class="secondary" data-action="refresh-l4l-results" ${state.loading ? 'disabled' : ''}>Refresh Results</button>
+          </div>
+          <p class="diagnostic-error">Missing required L4L comparison fields: ${escapeHtml(validation.missingFields.join(', '))}</p>
+          ${renderL4LDiagnostics()}
+        </section>
+      `;
+    }
+
+    const context = inferComparisonContext(rows);
+    const selectedSummary = calculateComparisonSummary(rows, { comparableCoverageOn: state.l4lComparableCoverageOn });
+    const coverageText = state.l4lComparableCoverageOn ? 'L4L ON' : 'L4L OFF';
+
+    return `
+      <section class="panel panel-wide phase2-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Store Performance — L4L Comparison</h2>
+            <p class="note">Comparing ${escapeHtml(context.period_label_current || 'Current')} vs ${escapeHtml(context.period_label_prior || 'Prior')} · ${escapeHtml(context.metric_display_name || context.metric || 'Metric')} · ${escapeHtml(context.store_name || context.store_code || 'Store')}</p>
+          </div>
+          <button class="secondary" data-action="refresh-l4l-results" ${state.loading ? 'disabled' : ''}>Refresh Results</button>
+        </div>
+        ${renderL4LDiagnostics()}
+        <div class="toggle-row" aria-label="Comparable Coverage">
+          <span>Comparable Coverage</span>
+          <div class="segmented-control">
+            <button class="${state.l4lComparableCoverageOn ? 'active' : ''}" data-action="set-l4l-on">L4L ON</button>
+            <button class="${state.l4lComparableCoverageOn ? '' : 'active'}" data-action="set-l4l-off">L4L OFF</button>
+          </div>
+        </div>
+        <p class="note">L4L ON uses mask_include_flag = Y. L4L OFF uses all rows in the prepared comparison fact dataset.</p>
+        <h3>Main Result Summary (${escapeHtml(coverageText)})</h3>
+        <div class="metric-grid">
+          ${metric('Current Value', formatNumber(selectedSummary.current_value))}
+          ${metric('Prior Value', formatNumber(selectedSummary.prior_value))}
+          ${metric('Absolute Variance', formatSignedNumber(selectedSummary.absolute_variance))}
+          ${metric('Variance %', selectedSummary.percent_change_display)}
+          ${metric('Current Weeks', selectedSummary.included_current_weeks)}
+          ${metric('Prior Weeks', selectedSummary.included_prior_weeks)}
+          ${metric('Weeks Without Source Data', selectedSummary.weeks_without_source_data)}
+          ${metric('Source Records Matched', selectedSummary.source_records_matched)}
+          ${metric('Status', selectedSummary.comparison_status)}
+        </div>
+        ${renderL4LResultComparisonTable(rows)}
+        ${renderExcludedCoverageWeeks(rows)}
+        ${renderL4LWeeklyDetail(rows)}
+      </section>
+    `;
+  }
+
+  function renderL4LDiagnostics() {
+    const diagnostics = state.l4lDiagnostics || {};
+    return `
+      <div class="diagnostic-item ${diagnostics.queryable ? 'diagnostic-ok' : 'diagnostic-warning'}">
+        <span>L4L comparison dataset</span>
+        <strong>${escapeHtml(diagnostics.alias || L4L_COMPARISON_ALIAS)}</strong>
+        <p>${escapeHtml(diagnostics.message || state.l4lMessage || 'L4L comparison status is unknown.')}</p>
+        ${diagnostics.errorStatus || diagnostics.errorMessage ? `<p class="diagnostic-error">Status ${escapeHtml(diagnostics.errorStatus || 'unknown')}: ${escapeHtml(diagnostics.errorMessage)}</p>` : ''}
+      </div>
+    `;
+  }
+
+  function renderL4LResultComparisonTable(rows) {
+    const onSummary = calculateComparisonSummary(rows, { comparableCoverageOn: true });
+    const offSummary = calculateComparisonSummary(rows, { comparableCoverageOn: false });
+    return `
+      <h3>Result Comparison</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Coverage Mode</th>
+              <th>Current Value</th>
+              <th>Prior Value</th>
+              <th>Absolute Variance</th>
+              <th>Variance %</th>
+              <th>Current Weeks</th>
+              <th>Prior Weeks</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${renderComparisonSummaryRow('L4L ON', onSummary)}
+            ${renderComparisonSummaryRow('L4L OFF', offSummary)}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderComparisonSummaryRow(label, summary) {
+    return `
+      <tr>
+        <td>${escapeHtml(label)}</td>
+        <td>${escapeHtml(formatNumber(summary.current_value))}</td>
+        <td>${escapeHtml(formatNumber(summary.prior_value))}</td>
+        <td>${escapeHtml(formatSignedNumber(summary.absolute_variance))}</td>
+        <td>${escapeHtml(formatPercentChange(summary.percent_change))}</td>
+        <td>${escapeHtml(summary.included_current_weeks)}</td>
+        <td>${escapeHtml(summary.included_prior_weeks)}</td>
+        <td>${escapeHtml(summary.comparison_status)}</td>
+      </tr>
+    `;
+  }
+
+  function renderExcludedCoverageWeeks(rows) {
+    const excludedRows = getExcludedWeeks(rows);
+    return `
+      <h3>Weeks Excluded by Comparable Coverage</h3>
+      ${excludedRows.length ? `
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Period Type</th>
+                <th>Side</th>
+                <th>Slot</th>
+                <th>Financial Year</th>
+                <th>Week</th>
+                <th>Month</th>
+                <th>Week Ending</th>
+                <th>Final CCM Outcome</th>
+                <th>Outcome Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${excludedRows.map((row) => `
+                <tr>
+                  <td>${escapeHtml(row.period_type)}</td>
+                  <td>${escapeHtml(row.comparison_side)}</td>
+                  <td>${escapeHtml(row.comparable_week_slot ?? '-')}</td>
+                  <td>${escapeHtml(row.financial_year || '-')}</td>
+                  <td>${escapeHtml(row.week_of_year ?? '-')}</td>
+                  <td>${escapeHtml(row.month_of_year ?? '-')}</td>
+                  <td>${escapeHtml(row.week_ending)}</td>
+                  <td>${escapeHtml(row.final_include_flag || row.mask_include_flag || '-')}</td>
+                  <td>${escapeHtml(row.final_reason_code || row.system_reason_code || '-')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : emptyState('No weeks are excluded by comparable coverage.')}
+    `;
+  }
+
+  function renderL4LWeeklyDetail(rows) {
+    const detailRows = getRowsForCoverageMode(rows, { comparableCoverageOn: state.l4lComparableCoverageOn });
+    return `
+      <h3>Weekly Detail</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Period Type</th>
+              <th>Side</th>
+              <th>Slot</th>
+              <th>Financial Year</th>
+              <th>Week</th>
+              <th>Month</th>
+              <th>Week Ending</th>
+              <th>Source Value</th>
+              <th>Source Data Status</th>
+              <th>Trading Expectation</th>
+              <th>Manual Coverage Adjustment</th>
+              <th>Coverage Decision</th>
+              <th>Final CCM Outcome</th>
+              <th>Outcome Reason</th>
+              <th>Alignment Impact</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${detailRows.map((row) => `
+              <tr>
+                <td>${escapeHtml(row.period_type)}</td>
+                <td>${escapeHtml(row.comparison_side)}</td>
+                <td>${escapeHtml(row.comparable_week_slot ?? '-')}</td>
+                <td>${escapeHtml(row.financial_year || '-')}</td>
+                <td>${escapeHtml(row.week_of_year ?? '-')}</td>
+                <td>${escapeHtml(row.month_of_year ?? '-')}</td>
+                <td>${escapeHtml(row.week_ending)}</td>
+                <td>${escapeHtml(formatNumber(row.source_value))}</td>
+                <td>${escapeHtml(row.source_data_status || (row.source_row_count > 0 ? 'Available' : 'Missing / Zero-filled'))}</td>
+                <td>${escapeHtml(row.system_include_flag || '-')}</td>
+                <td>${escapeHtml(row.manual_include_flag || '-')}</td>
+                <td>${escapeHtml(row.effective_include_flag || row.final_include_flag || '-')}</td>
+                <td>${escapeHtml(row.final_include_flag || row.mask_include_flag || '-')}</td>
+                <td>${escapeHtml(row.final_reason_code || row.manual_reason || row.system_reason_code || '-')}</td>
+                <td>${escapeHtml(l4lPropagationImpact(row))}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
   function renderPeriodTable(rows) {
     const page = getPeriodPage(reviewRowsForRows(rows), state.periodPage);
     return `
@@ -365,6 +666,10 @@ export function createApp(root) {
     });
     root.querySelector('[data-action="save-overrides"]')?.addEventListener('click', saveOverrides);
     root.querySelector('[data-action="generate-mask"]')?.addEventListener('click', generateMask);
+    root.querySelector('[data-action="run-l4l-workflow"]')?.addEventListener('click', runL4LWorkflow);
+    root.querySelector('[data-action="refresh-l4l-results"]')?.addEventListener('click', refreshL4LResults);
+    root.querySelector('[data-action="set-l4l-on"]')?.addEventListener('click', () => setL4LCoverageMode(true));
+    root.querySelector('[data-action="set-l4l-off"]')?.addEventListener('click', () => setL4LCoverageMode(false));
     root.querySelector('[data-action="confirm-appdb-write"]')?.addEventListener('click', confirmAppDbWrite);
     root.querySelector('[data-action="cancel-appdb-write"]')?.addEventListener('click', cancelAppDbWrite);
     root.querySelector('[data-action="period-page-prev"]')?.addEventListener('click', () => {
@@ -611,6 +916,77 @@ export function createApp(root) {
     }
   }
 
+  async function runL4LWorkflow() {
+    setLoading('Running Prepare L4L Comparison Facts Workflow...');
+    state.workflowProgress = {
+      phase: 'starting',
+      status: 'STARTING',
+      attempt: 0,
+      maxPollAttempts: 60,
+      percent: 0
+    };
+    render();
+    try {
+      const result = await runPrepareL4LWorkflow({
+        onProgress: (progress) => {
+          state.workflowProgress = progress;
+          render();
+        }
+      });
+      if (result.status === 'COMPLETED') {
+        const comparisonResult = await loadComparisonRows();
+        applyL4LResult(comparisonResult);
+        state.status = comparisonResult.empty
+          ? `${result.message} ${comparisonResult.message}`
+          : `${result.message} Loaded ${comparisonResult.rows.length} L4L comparison fact row(s).`;
+      } else {
+        state.status = result.message;
+      }
+      state.l4lMessage = result.message;
+      if (['START_FAILED', 'FAILED', 'CANCELED'].includes(result.status)) {
+        state.error = result.message;
+      } else {
+        state.error = '';
+      }
+    } catch (error) {
+      state.error = `Workflow trigger failed: ${readableError(error)}`;
+    } finally {
+      state.loading = false;
+      render();
+    }
+  }
+
+  async function refreshL4LResults() {
+    setLoading('Refreshing L4L comparison results...');
+    try {
+      const result = await loadComparisonRows();
+      applyL4LResult(result);
+      state.status = result.empty ? result.message : `Loaded ${result.rows.length} L4L comparison fact row(s).`;
+      state.error = '';
+    } catch (error) {
+      state.error = `Unable to refresh L4L comparison results: ${readableError(error)}`;
+    } finally {
+      state.loading = false;
+      render();
+    }
+  }
+
+  function applyL4LResult(result) {
+    state.l4lRows = result.rows || [];
+    state.l4lSource = result.source || 'unknown';
+    state.l4lValidation = result.validation || { valid: true, missingFields: [] };
+    state.l4lDiagnostics = result.diagnostics || state.l4lDiagnostics;
+    state.l4lMessage = result.message || state.l4lDiagnostics?.message || '';
+  }
+
+  function setL4LCoverageMode(comparableCoverageOn) {
+    state.l4lComparableCoverageOn = comparableCoverageOn;
+    state.status = comparableCoverageOn
+      ? 'Comparable Coverage set to L4L ON.'
+      : 'Comparable Coverage set to L4L OFF.';
+    render();
+  }
+
   function selectedStore() {
     return (state.sourceProfile?.stores || []).find((store) => store.store_code === state.selectedStoreCode) || null;
   }
@@ -686,6 +1062,14 @@ export function createApp(root) {
     if (row.final_reason_code === 'PAIRED_SLOT_EXCLUSION') return 'Current/prior paired slot excluded';
     if (row.final_include_flag === FLAGS.no) return 'Direct exclusion';
     return 'None';
+  }
+
+  function l4lPropagationImpact(row) {
+    if (row.final_reason_code === 'WEEK_53_EXCLUDED') return 'Automatically excluded from comparable week alignment';
+    if (row.final_reason_code === 'STORE_METRIC_WEEK_PROPAGATED_EXCLUSION') return 'Same Store + Metric + Week excluded elsewhere';
+    if (row.final_reason_code === 'PAIRED_SLOT_EXCLUSION') return 'Current/prior paired slot excluded';
+    if (row.mask_include_flag === FLAGS.no || row.final_include_flag === FLAGS.no) return 'Excluded from L4L ON';
+    return 'Included';
   }
 
   function displayOutcomeReason(row, override) {

@@ -84,6 +84,17 @@ npm run build
 
 Do not run `domo publish`.
 
+## Phase G: Phase 2 L4L Visualization
+
+- Add manifest dataset alias `l4lComparisonFact` for the existing Workflow output dataset.
+- Read Phase 2 rows through `/data/v1/l4lComparisonFact`.
+- Do not hardcode the Phase 2 dataset id in frontend read logic.
+- Do not modify the Workflow, Magic ETL, DataFlow, source dataset, or AppDB for Phase 2.
+- Trigger the existing Workflow through `domo.workflow.start('prepareL4LFacts', {})` when Domo runtime exposes `domo.workflow`.
+- Poll `domo.workflow.getInstance('prepareL4LFacts', instanceId)` and show frontend progress until `COMPLETED`, `FAILED`, or `CANCELED`.
+- If `domo.workflow` is unavailable, show the manual instruction: `Run the Workflow manually in Domo, then click Refresh Results.`
+- Render Store Performance L4L comparison with L4L ON/OFF, result summary, excluded weeks, and weekly detail.
+
 ## Out of Scope for Phase 1
 
 - Generate Full CCM Mask
