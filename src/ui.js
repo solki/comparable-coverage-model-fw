@@ -23,26 +23,35 @@ import {
   runPrepareL4LWorkflow
 } from './workflowService.js';
 import {
+  buildExecutionModal,
+  getCoverageModeLabel,
+  getTooltipCopy,
+  getWorkflowSteps
+} from './workflowUiState.js';
+import {
   computeGlobalDatasetOverview,
   computeSelectedScopeSummary,
   getSourceFactForScope
 } from './scopeSummary.js';
 import { displayText, helperText, labels } from './terminology.js';
 
+const CCM_UI_STATE_STORAGE_KEY = 'forty_winks_ccm_ui_state_v1';
+
 export function createApp(root) {
+  const persistedUiState = loadPersistedUiState();
   const state = {
     loading: false,
-    status: 'Ready',
+    status: persistedUiState.status || 'Ready',
     error: '',
     sourceRows: [],
     sourceMode: 'unknown',
     sourceProfile: null,
     periodRows: [],
-    periodPage: 1,
+    periodPage: persistedUiState.periodPage || 1,
     periodSource: 'none',
-    selectedStoreCode: '',
-    selectedMetric: '',
-    selectedPeriodType: '',
+    selectedStoreCode: persistedUiState.selectedStoreCode || '',
+    selectedMetric: persistedUiState.selectedMetric || '',
+    selectedPeriodType: persistedUiState.selectedPeriodType || '',
     manualOverrides: [],
     diagnostics: {
       source: {
@@ -60,7 +69,6 @@ export function createApp(root) {
     },
     lastRun: null,
     pendingWrite: null,
-    validationSummary: null,
     rebuildProgress: null,
     l4lRows: [],
     l4lSource: 'none',
@@ -71,10 +79,51 @@ export function createApp(root) {
       queryable: false,
       message: 'L4L comparison data has not been queried yet.'
     },
-    l4lComparableCoverageOn: true,
-    l4lMessage: 'No L4L comparison data is available. Run the Prepare L4L Comparison Facts Workflow first.',
-    workflowProgress: null
+    l4lComparableCoverageOn: persistedUiState.l4lComparableCoverageOn ?? true,
+    l4lMessage: persistedUiState.l4lMessage || 'No L4L comparison data is available. Run the Prepare L4L Comparison Facts Workflow first.',
+    workflowProgress: null,
+    diagnosticsOpen: Boolean(persistedUiState.diagnosticsOpen),
+    activeEvidenceTab: persistedUiState.activeEvidenceTab || 'excluded',
+    excludedFilters: {
+      side: persistedUiState.excludedFilters?.side || 'all',
+      reason: persistedUiState.excludedFilters?.reason || 'all',
+      manualOnly: Boolean(persistedUiState.excludedFilters?.manualOnly),
+      week53Only: Boolean(persistedUiState.excludedFilters?.week53Only)
+    },
+    reviewConfirmed: Boolean(persistedUiState.reviewConfirmed),
+    comparisonRefreshPending: Boolean(persistedUiState.comparisonRefreshPending),
+    workflowCompletedAt: persistedUiState.workflowCompletedAt || '',
+    scopeDirty: Boolean(persistedUiState.scopeDirty),
+    executionModal: null,
+    stepAcknowledged: {
+      mask: Boolean(persistedUiState.stepAcknowledged?.mask),
+      workflow: Boolean(persistedUiState.stepAcknowledged?.workflow)
+    },
+    stepCompletion: {
+      mask: Boolean(persistedUiState.stepCompletion?.mask)
+    },
+    validationSummary: persistedUiState.validationSummary || null
   };
+
+  installFormSubmitGuard();
+
+  function installFormSubmitGuard() {
+    if (typeof document === 'undefined' || root.__ccmSubmitGuardInstalled) return;
+
+    root.__ccmSubmitGuardInstalled = true;
+    document.addEventListener('submit', (event) => {
+      const target = event.target;
+      const submitBelongsToApp = Boolean(
+        target
+          && typeof target.contains === 'function'
+          && (target.contains(root) || root.contains(target))
+      );
+
+      if (submitBelongsToApp) {
+        event.preventDefault();
+      }
+    }, true);
+  }
 
   async function init() {
     setLoading('Loading source summary and comparable weeks...');
@@ -84,22 +133,30 @@ export function createApp(root) {
       state.sourceRows = sourceResult.rows;
       state.sourceMode = sourceResult.source;
       state.sourceProfile = sourceResult.profile;
-      state.selectedStoreCode = sourceResult.profile?.stores?.[0]?.store_code || '';
-      state.selectedMetric = sourceResult.profile?.metrics?.[0]?.metric || '';
+      state.selectedStoreCode = resolveStoreCode(sourceResult.profile, state.selectedStoreCode);
+      state.selectedMetric = resolveMetric(sourceResult.profile, state.selectedMetric);
       state.periodRows = periods.rows;
-      state.selectedPeriodType = periods.rows[0]?.period_type || '';
+      state.selectedPeriodType = resolvePeriodType(periods.rows, state.selectedPeriodType);
       state.periodSource = periods.source;
       state.manualOverrides = await loadOverridesForSelection();
       const l4lResult = await loadComparisonRows();
       applyL4LResult(l4lResult);
+      const recoveredAfterDomoRefresh = state.comparisonRefreshPending && !l4lResult.empty && l4lResult.rows.length;
+      if (recoveredAfterDomoRefresh) {
+        state.comparisonRefreshPending = false;
+        state.stepAcknowledged.workflow = true;
+      }
       state.diagnostics = mergeDiagnostics(
         state.diagnostics,
         sourceResult.diagnostics,
         periods.diagnostics
       );
-      state.status = sourceResult.warning
-        ? `Source loaded from mock mode: ${sourceResult.warning}`
-        : 'Source summary loaded.';
+      state.status = initialStatusMessage({
+        recoveredAfterDomoRefresh,
+        l4lRowCount: l4lResult.rows.length,
+        comparisonRefreshPending: state.comparisonRefreshPending,
+        sourceWarning: sourceResult.warning
+      });
       state.error = '';
     } catch (error) {
       state.error = readableError(error);
@@ -112,33 +169,303 @@ export function createApp(root) {
   function render() {
     root.innerHTML = `
       <main class="app-shell">
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">Forty Winks CCM</p>
-            <h1>Weekly Mask Generator</h1>
-          </div>
-          <div class="runtime-pill">${escapeHtml(getRuntimeLabel())}</div>
-        </header>
-
-        ${state.error ? `<section class="banner banner-error">${escapeHtml(state.error)}</section>` : ''}
-        <section class="banner">${escapeHtml(state.status)}</section>
-        ${renderDiagnosticsPanel(state.diagnostics)}
-
-        <section class="panel-grid">
-          ${renderGlobalDatasetOverview()}
-          ${renderSelectionControls()}
-          ${renderSelectedScopeSummary()}
-          ${renderPeriodDefinitions()}
-          ${renderGenerateMask()}
-          ${renderValidationSummary()}
-          ${renderPrepareL4LWorkflowPanel()}
-          ${renderL4LComparisonVisualization()}
-        </section>
+        ${renderCommandHeader()}
+        ${state.error ? `<section class="banner banner-error" role="alert">${escapeHtml(state.error)}</section>` : ''}
+        <section class="banner" aria-live="polite">${escapeHtml(state.status)}</section>
+        ${renderStaleDataBanner()}
+        ${renderNextActionStrip()}
+        ${renderWorkflowRail()}
+        ${renderActiveStepWorkspace()}
+        ${renderEvidenceTabs()}
+        ${renderDiagnosticsDrawer()}
         ${state.pendingWrite ? renderWriteConfirmation(state.pendingWrite) : ''}
+        ${state.executionModal ? renderExecutionModal(state.executionModal) : ''}
       </main>
     `;
 
     bindEvents();
+    persistUiState(state);
+  }
+
+  function renderCommandHeader() {
+    return `
+      <header class="command-header">
+        <div class="command-title">
+          <p class="eyebrow">Command Center</p>
+          <h1>Forty Winks CCM</h1>
+          <p class="topbar-subtitle">Comparable Coverage Workflow for building governed L4L comparison facts and explaining excluded weeks.</p>
+        </div>
+        ${renderScopeBar()}
+        <div class="header-actions health-strip">
+          <div class="runtime-pill">${escapeHtml(getRuntimeLabel())}</div>
+          ${healthChip('Source', state.diagnostics?.source?.queryable)}
+          ${healthChip('AppDB', state.diagnostics?.appDb?.reachable)}
+          ${healthChip('Workflow', getWorkflowTriggerSupport().supported)}
+          <button type="button" class="secondary icon-button" data-action="toggle-diagnostics" aria-expanded="${state.diagnosticsOpen ? 'true' : 'false'}">
+            Diagnostics
+          </button>
+        </div>
+      </header>
+    `;
+  }
+
+  function renderScopeBar() {
+    const context = state.l4lRows.length ? inferComparisonContext(state.l4lRows) : {};
+    return `
+      <section class="scope-bar" aria-label="Selected Scope">
+        <div>
+          <span>Store</span>
+          <strong>${escapeHtml(selectedStoreDisplay())}</strong>
+        </div>
+        <div>
+          <span>Metric</span>
+          <strong>${escapeHtml(state.selectedMetric || '-')}</strong>
+        </div>
+        <div>
+          <span>${escapeHtml(labels.periodLens)}</span>
+          <strong>${escapeHtml(state.selectedPeriodType || '-')}</strong>
+        </div>
+        <div>
+          <span>Comparison</span>
+          <strong>${escapeHtml(context.period_label_current || 'Current')} vs ${escapeHtml(context.period_label_prior || 'Prior')}</strong>
+        </div>
+        ${state.scopeDirty ? '<div class="scope-stale-chip">Stale scope</div>' : ''}
+      </section>
+    `;
+  }
+
+  function healthChip(label, ok) {
+    const stateLabel = ok ? 'Ready' : 'Check';
+    return `<span class="health-chip ${ok ? 'health-ok' : 'health-warn'}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(stateLabel)}</strong></span>`;
+  }
+
+  function renderStaleDataBanner() {
+    if (!state.scopeDirty) return '';
+    return `
+      <section class="stale-data-banner" role="status" aria-live="polite">
+        <strong>Scope changed.</strong>
+        Existing mask and L4L result context may no longer match the selected scope. Rebuild the selected-scope mask before running the Workflow.
+      </section>
+    `;
+  }
+
+  function renderNextActionStrip() {
+    const action = nextBestAction();
+    return `
+      <section class="next-action-strip" aria-label="Next best action">
+        <div>
+          <p class="eyebrow">Next best action</p>
+          <h2>${escapeHtml(action.title)}</h2>
+          <p class="note">${escapeHtml(action.reason)}</p>
+          ${action.disabledReason ? `<p class="disabled-reason">${escapeHtml(action.disabledReason)}</p>` : ''}
+        </div>
+        <div class="next-action-control">
+          ${action.action ? `<button type="button" class="${escapeAttribute(action.kind || 'primary')} compact" data-action="${escapeAttribute(action.action)}" ${action.disabled ? 'disabled' : ''}>${escapeHtml(action.buttonLabel)}</button>` : statusBadge(action.status || activeWorkflowStep().status)}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderWorkflowRail() {
+    return `
+      <nav class="workflow-rail" aria-label="CCM workflow">
+        ${workflowSteps().map((step) => `
+          <button
+            class="workflow-rail-step workflow-step workflow-step-${escapeAttribute(step.status)}"
+            type="button"
+            data-step-id="${escapeAttribute(step.id)}"
+            ${step.status === 'locked' ? 'disabled' : ''}
+            title="${escapeAttribute(step.disabledReason || step.help)}"
+          >
+            <span class="step-index">${escapeHtml(stepStatusIcon(step.status, step.number))}</span>
+            <span class="step-copy">
+              <strong>${escapeHtml(step.title)} ${renderInfoTooltip(step.help)}</strong>
+              <small>${escapeHtml(step.layer)}</small>
+              ${step.disabledReason && step.status === 'locked' ? `<em>${escapeHtml(step.disabledReason)}</em>` : ''}
+            </span>
+          </button>
+        `).join('')}
+      </nav>
+    `;
+  }
+
+  function renderWorkflowStepper() {
+    return renderWorkflowRail();
+  }
+
+  function renderActiveStepWorkspace() {
+    const step = activeWorkflowStep();
+    return `
+      <section class="active-step-workspace active-step-${escapeAttribute(step.id)}">
+        <div class="workspace-heading">
+          <div>
+            <p class="eyebrow">Active Work Area</p>
+            <h2>${escapeHtml(step.number)}. ${escapeHtml(step.title)} ${renderInfoTooltip(step.help)}</h2>
+            <p class="note">${escapeHtml(guidedStepDescription(step.id))}</p>
+            ${step.disabledReason && step.status === 'locked' ? `<p class="disabled-reason">${escapeHtml(step.disabledReason)}</p>` : ''}
+          </div>
+          ${statusBadge(step.status)}
+        </div>
+        <div class="workspace-grid">
+          ${renderActiveStepBody(step)}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderActiveStepBody(step) {
+    if (step.id === 'workflow') {
+      return `${renderPrepareL4LWorkflowPanel()}${renderValidationSummary()}`;
+    }
+    if (step.id === 'results') {
+      return `${renderL4LComparisonVisualization()}${renderPrepareL4LWorkflowPanel()}`;
+    }
+    if (step.id === 'exclusions') {
+      return state.l4lRows.length ? renderL4LComparisonVisualization() : renderPrepareL4LWorkflowPanel();
+    }
+    return `${renderSelectionControls()}${renderSelectedScopeSummary()}${renderGenerateMask()}${renderPeriodDefinitions()}${renderValidationSummary()}`;
+  }
+
+  function renderGuidedStep() {
+    const step = activeWorkflowStep();
+    const nextCopy = nextStepCopy(step);
+    return `
+      <section class="guided-step guided-step-${escapeAttribute(step.status)}">
+        <div>
+          <p class="eyebrow">Guided workflow</p>
+          <h2>${escapeHtml(step.number)}. ${escapeHtml(step.title)} ${renderInfoTooltip(step.help)}</h2>
+          <p class="note">${escapeHtml(guidedStepDescription(step.id))}</p>
+          ${step.disabledReason && step.status === 'locked' ? `<p class="disabled-reason">${escapeHtml(step.disabledReason)}</p>` : ''}
+          ${nextCopy ? `<p class="next-guidance">${escapeHtml(nextCopy)}</p>` : ''}
+        </div>
+        <div class="guided-status">
+          ${statusBadge(step.status)}
+        </div>
+      </section>
+    `;
+  }
+
+  function workflowSteps() {
+    return getWorkflowSteps({
+      hasSourceProfile: Boolean(state.sourceProfile),
+      hasSelectedScope: Boolean(state.selectedStoreCode && state.selectedMetric && state.selectedPeriodType),
+      hasReviewConfirmed: Boolean(state.reviewConfirmed),
+      hasMaskCompleted: Boolean(state.stepCompletion.mask),
+      hasMaskAcknowledged: Boolean(state.stepAcknowledged.mask),
+      hasComparisonRows: Boolean(state.l4lRows.length),
+      hasWorkflowAcknowledged: Boolean(state.stepAcknowledged.workflow),
+      hasMaskError: Boolean(state.validationSummary?.rebuild_status === 'failed' || state.validationSummary?.rebuild_status === 'clear_failed'),
+      hasWorkflowError: Boolean(state.error && state.error.includes('Workflow')),
+      hasComparisonError: Boolean(state.l4lValidation && state.l4lValidation.valid === false)
+    });
+  }
+
+  function activeWorkflowStep() {
+    const steps = workflowSteps();
+    return steps.find((step) => ['ready', 'error', 'completed_unacknowledged'].includes(step.status))
+      || steps.find((step) => step.status === 'locked')
+      || steps[steps.length - 1];
+  }
+
+  function guidedStepDescription(stepId) {
+    if (stepId === 'mask') return 'Generate or rebuild the selected-scope Comparable Coverage mask for the current Store, Metric, and Period Lens.';
+    if (stepId === 'workflow') return 'Run the mapped Domo Workflow so AppDB mask output is prepared into the L4L comparison fact dataset.';
+    if (stepId === 'results') return 'Review Current vs Prior results with Comparable Coverage ON or OFF.';
+    return 'Review the weeks removed by Comparable Coverage and the business reason for each exclusion.';
+  }
+
+  function nextStepCopy(step) {
+    if (step.status === 'completed_unacknowledged') return 'Click Complete in the progress modal before the next step unlocks.';
+    if (step.id === 'workflow' && step.status === 'ready') return 'The Workflow action is now available because the selected-scope mask was acknowledged.';
+    if (step.id === 'results' && step.status === 'ready') return 'Refresh Results to load the latest L4L comparison facts.';
+    return '';
+  }
+
+  function nextBestAction() {
+    const step = activeWorkflowStep();
+    const support = getWorkflowTriggerSupport();
+
+    if (!state.sourceProfile) {
+      return {
+        title: 'Load source summary to begin.',
+        reason: 'The app needs the mapped source_metrics alias before Store, Metric, and Period Lens can be validated.',
+        action: 'refresh-source',
+        buttonLabel: 'Refresh Source',
+        disabled: state.loading
+      };
+    }
+
+    if (step.status === 'completed_unacknowledged' && step.id === 'mask') {
+      return {
+        title: 'Review the completed mask build.',
+        reason: 'Click Complete and Unlock Workflow before preparing comparison facts.',
+        status: step.status
+      };
+    }
+
+    if (step.status === 'completed_unacknowledged' && step.id === 'workflow') {
+      return {
+        title: 'Review the completed Workflow run.',
+        reason: 'Click Complete and Review Results before moving to the result board.',
+        status: step.status
+      };
+    }
+
+    if (step.id === 'mask') {
+      if (!state.reviewConfirmed) {
+        return {
+          title: 'Confirm Comparable Week Review.',
+          reason: 'Review the comparable weeks and click Save Overrides to confirm Comparable Week Review before building the selected-scope mask.',
+          action: 'save-overrides',
+          buttonLabel: 'Save Overrides',
+          disabled: state.loading || !state.selectedStoreCode || !state.selectedMetric,
+          disabledReason: 'Save Overrides to confirm Comparable Week Review before Build Coverage Mask becomes available.',
+          kind: 'secondary'
+        };
+      }
+
+      return {
+        title: `Build the selected-scope mask for ${state.selectedStoreCode || '-'} / ${state.selectedMetric || '-'} / ${state.selectedPeriodType || '-'}.`,
+        reason: 'The Workflow uses this selected-scope mask output to prepare comparison facts.',
+        action: 'generate-mask',
+        buttonLabel: 'Rebuild Selected Scope Mask',
+        disabled: step.status === 'locked' || state.loading || !selectedPeriodRows().length,
+        disabledReason: step.disabledReason
+      };
+    }
+
+    if (step.id === 'workflow') {
+      return {
+        title: 'Run Prepare L4L Comparison Facts.',
+        reason: support.supported
+          ? 'The selected-scope mask is acknowledged and the mapped Domo Workflow can now prepare comparison facts.'
+          : 'Automatic trigger is unavailable in this runtime. Run the Workflow manually in Domo, then refresh results.',
+        action: support.supported ? 'run-l4l-workflow' : 'refresh-l4l-results',
+        buttonLabel: support.supported ? 'Run Workflow and Refresh Results' : 'Refresh Results',
+        disabled: state.loading || (support.supported && step.status !== 'ready'),
+        disabledReason: step.disabledReason,
+        kind: support.supported ? 'primary' : 'secondary'
+      };
+    }
+
+    if (step.id === 'results') {
+      return {
+        title: 'Review L4L ON vs L4L OFF results.',
+        reason: state.l4lRows.length
+          ? 'Comparison facts are loaded. Use the result board to understand the impact of Comparable Coverage.'
+          : 'Refresh Results after the Domo Workflow completes.',
+        action: 'refresh-l4l-results',
+        buttonLabel: 'Refresh Results',
+        disabled: state.loading,
+        kind: 'secondary'
+      };
+    }
+
+    return {
+      title: 'Review the weeks excluded by Comparable Coverage.',
+      reason: 'Use the evidence area to see which weeks were removed from L4L ON and why.',
+      status: step.status
+    };
   }
 
   function renderGlobalDatasetOverview() {
@@ -148,7 +475,7 @@ export function createApp(root) {
       <section class="panel">
         <div class="panel-heading">
           <h2>Global Dataset Overview</h2>
-          <button class="secondary" data-action="refresh-source" ${state.loading ? 'disabled' : ''}>Refresh</button>
+          <button type="button" class="secondary" data-action="refresh-source" ${state.loading ? 'disabled' : ''}>Refresh</button>
         </div>
         ${profile ? `
           <div class="metric-grid">
@@ -242,40 +569,40 @@ export function createApp(root) {
     return `
       <section class="panel panel-wide">
         <div class="panel-heading">
-          <h2>Comparable Week Review / Override Editor</h2>
-          <button class="secondary" data-action="save-overrides" ${state.loading || !state.selectedStoreCode || !state.selectedMetric ? 'disabled' : ''}>Save Overrides</button>
+          <div>
+            <h2>Comparable Week Review / Override Editor</h2>
+            ${statusBadge(state.reviewConfirmed ? 'complete' : 'locked')}
+          </div>
+          <button type="button" class="secondary" data-action="save-overrides" ${state.loading || !state.selectedStoreCode || !state.selectedMetric ? 'disabled' : ''}>Save Overrides</button>
         </div>
         <p class="note">Source: ${escapeHtml(state.periodSource)}. Validation: ${validation.valid ? 'valid' : `${validation.errors.length} error(s)`}. Fiscal weeks are derived from sourceMetrics at runtime and are not persisted in AppDB. ${escapeHtml(helperText.tradingExpectation)}</p>
+        ${state.reviewConfirmed ? '<p class="success-message">Comparable Week Review confirmed. Build Coverage Mask is now available.</p>' : '<p class="disabled-reason">Save Overrides to confirm Comparable Week Review before building the selected-scope mask.</p>'}
         ${visibleRows.length ? renderPeriodTable(visibleRows) : emptyState('No comparable weeks are available for the selected Period Lens.')}
       </section>
     `;
   }
 
   function renderGenerateMask() {
+    const step = workflowSteps().find((item) => item.id === 'mask');
+    const isLocked = step?.status === 'locked' || state.loading;
     return `
-      <section class="panel">
+      <section class="panel step-card">
         <div class="panel-heading">
-          <h2>Generate Selected Scope</h2>
+          <h2>Build Coverage Mask ${renderInfoTooltip(getTooltipCopy('comparableCoverage'))}</h2>
+          ${statusBadge(step?.status || 'locked')}
         </div>
         <p class="note">${escapeHtml(displayText.selectedScopeOutput)}</p>
         <p class="note">${escapeHtml(displayText.selectedScopeCollection)}</p>
         <p class="note">${escapeHtml(helperText.selectedScopeMask)}</p>
-        <button class="primary" data-action="generate-mask" ${state.loading || !state.sourceProfile || !selectedPeriodRows().length || !state.selectedStoreCode || !state.selectedMetric ? 'disabled' : ''}>
+        ${step?.disabledReason ? `<p class="disabled-reason">${escapeHtml(step.disabledReason)}</p>` : ''}
+        <button type="button" class="primary" data-action="generate-mask" ${isLocked || !state.reviewConfirmed || !state.sourceProfile || !selectedPeriodRows().length || !state.selectedStoreCode || !state.selectedMetric ? 'disabled' : ''}>
           Rebuild Selected Scope Mask
         </button>
       </section>
-      <section class="panel">
-        <div class="panel-heading">
-          <h2>Generate Full CCM Mask</h2>
-        </div>
-        <p class="note">${escapeHtml(displayText.fullMaskOutput)}</p>
-        <p class="note">${escapeHtml(displayText.fullMaskCollection)}</p>
-        <p class="note">${escapeHtml(displayText.fullMaskStatus)}</p>
-        <p class="note">Coming soon &mdash; planned for production. Full generation will rebuild the mask for all Stores x Metrics x Period Lenses. This may take longer and is intentionally disabled during Phase 1 prototype validation.</p>
-        <button class="secondary" disabled>
-          Generate Full CCM Mask
-        </button>
-      </section>
+      <div class="future-state-note">
+        <p>Generate Full CCM Mask: Coming soon, planned for production, and intentionally disabled during Phase 1 prototype validation. ${escapeHtml(displayText.fullMaskOutput)} ${escapeHtml(displayText.fullMaskCollection)} ${escapeHtml(displayText.fullMaskStatus)}</p>
+        <button type="button" class="secondary compact" disabled>Generate Full CCM Mask</button>
+      </div>
     `;
   }
 
@@ -320,16 +647,22 @@ export function createApp(root) {
 
   function renderPrepareL4LWorkflowPanel() {
     const support = getWorkflowTriggerSupport();
+    const step = workflowSteps().find((item) => item.id === 'workflow');
+    const canRunWorkflow = step?.status === 'ready' && support.supported && !state.loading;
+    const workflowErrorCopy = state.error && state.error.includes('Workflow')
+      ? 'Workflow could not be started. No comparison facts were changed. Check the Workflow mapping in Domo, or run the Workflow manually and then refresh results.'
+      : '';
     return `
-      <section class="panel panel-wide phase2-panel">
+      <section class="panel panel-wide phase2-panel step-card">
         <div class="panel-heading">
           <div>
-            <h2>Prepare L4L Comparison Facts</h2>
+            <h2>Prepare L4L Comparison Facts ${renderInfoTooltip(getTooltipCopy('workflowAlias'))}</h2>
             <p class="note">Workflow ${escapeHtml(PREPARE_L4L_WORKFLOW.version)} writes the output dataset used by this read-only visualization.</p>
           </div>
           <div class="button-row">
-            <button class="secondary" data-action="run-l4l-workflow" ${support.supported && !state.loading ? '' : 'disabled'}>Run Workflow and Refresh Results</button>
-            <button class="primary" data-action="refresh-l4l-results" ${state.loading ? 'disabled' : ''}>Refresh Results</button>
+            ${statusBadge(step?.status || 'locked')}
+            <button type="button" class="primary compact" data-action="run-l4l-workflow" ${canRunWorkflow ? '' : 'disabled'}>${support.supported ? 'Run Workflow and Refresh Results' : 'Run Workflow Automatically'}</button>
+            <button type="button" class="secondary" data-action="refresh-l4l-results" ${state.loading ? 'disabled' : ''}>Refresh Results</button>
           </div>
         </div>
         <div class="metric-grid">
@@ -340,8 +673,15 @@ export function createApp(root) {
           ${metric('Output Dataset', PREPARE_L4L_WORKFLOW.outputDatasetName)}
           ${metric('Dataset Alias', L4L_COMPARISON_ALIAS || 'l4lComparisonFact')}
         </div>
-        ${support.supported ? '<p class="note">Automatic Workflow trigger is available in Domo runtime.</p>' : `<p class="note">${escapeHtml(support.manualInstruction)}</p>`}
+        ${support.supported ? '<p class="note">Automatic Workflow trigger is available in Domo runtime.</p>' : `
+          <div class="manual-fallback">
+            <strong>Automatic trigger is unavailable in this runtime.</strong>
+            <p class="note">${escapeHtml(support.manualInstruction)}</p>
+          </div>
+        `}
         <p class="note">${escapeHtml(support.reason)}</p>
+        ${step?.disabledReason ? `<p class="disabled-reason">${escapeHtml(step.disabledReason)}</p>` : ''}
+        ${workflowErrorCopy ? `<p class="diagnostic-error" role="alert">${escapeHtml(workflowErrorCopy)}</p>` : ''}
         ${renderWorkflowProgress()}
       </section>
     `;
@@ -371,17 +711,100 @@ export function createApp(root) {
     `;
   }
 
+  function renderDiagnosticsDrawer() {
+    const source = state.diagnostics?.source || {};
+    const appDb = state.diagnostics?.appDb || {};
+    const l4l = state.l4lDiagnostics || {};
+    const support = getWorkflowTriggerSupport();
+
+    return `
+      <aside class="diagnostics-drawer ${state.diagnosticsOpen ? 'drawer-open' : ''}" aria-label="Technical Details" aria-hidden="${state.diagnosticsOpen ? 'false' : 'true'}">
+        <div class="drawer-header">
+          <div>
+            <p class="eyebrow">Technical Details</p>
+            <h2>Diagnostics ${renderInfoTooltip(getTooltipCopy('diagnostics'))}</h2>
+          </div>
+          <button type="button" class="secondary icon-button" data-action="close-diagnostics">Close</button>
+        </div>
+        <div class="diagnostics-grid">
+          ${diagnosticCard('Source alias', source.alias || SOURCE_DATASET_ALIAS, source.queryable, source.message || sourceStatusText(source), source)}
+          ${diagnosticCard('AppDB collections', appDb.reachable ? 'Reachable' : 'Fallback', appDb.reachable, appDb.message || appDbStatusText(appDb), appDb)}
+          ${diagnosticCard('Workflow trigger', PREPARE_L4L_WORKFLOW.alias, support.supported, support.reason, {})}
+          ${diagnosticCard('L4L comparison dataset', l4l.alias || L4L_COMPARISON_ALIAS, l4l.queryable, l4l.message || state.l4lMessage, l4l)}
+        </div>
+      </aside>
+    `;
+  }
+
+  function renderExecutionModal(modalState) {
+    const modal = buildExecutionModal(modalState);
+    return `
+      <section class="modal-backdrop execution-backdrop" role="presentation">
+        <div class="execution-modal" role="dialog" aria-modal="true" aria-labelledby="execution-modal-title" aria-describedby="execution-modal-status">
+          <div class="execution-header">
+            <div>
+              <p class="eyebrow">${escapeHtml(modal.progressLabel)}</p>
+              <h2 id="execution-modal-title">${escapeHtml(modal.title)}</h2>
+            </div>
+            ${statusBadge(modalState.status || 'running')}
+          </div>
+          <p class="note">${escapeHtml(modal.explanation)}</p>
+          <div class="progress-track execution-track" aria-label="Execution progress">
+            <div class="progress-fill" style="width: ${escapeAttribute(modal.percent)}%;"></div>
+          </div>
+          <p id="execution-modal-status" class="execution-status" role="status" aria-live="polite">${escapeHtml(modal.currentStatusText)}</p>
+          <ol class="execution-stages">
+            ${modal.stages.map((stage) => `
+              <li class="stage-${escapeAttribute(stage.state)}">
+                <span>${escapeHtml(stageIcon(stage.state))}</span>
+                <strong>${escapeHtml(stage.label)}</strong>
+              </li>
+            `).join('')}
+          </ol>
+          ${modal.resultSummary ? `<p class="success-message">${escapeHtml(modal.resultSummary)}</p>` : ''}
+          ${modal.errorMessage ? `<p class="diagnostic-error" role="alert">${escapeHtml(modal.errorMessage)}</p>` : ''}
+          <p class="note">No cancel button is shown while Domo is running the operation.</p>
+          <div class="button-row confirmation-actions">
+            ${modal.showCloseButton ? '<button type="button" class="secondary" data-action="close-execution-modal">Close</button>' : ''}
+            ${modal.showCompleteButton ? `<button type="button" class="primary compact" data-action="complete-execution-modal">${escapeHtml(executionCompleteButtonLabel(modalState.type))}</button>` : ''}
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  function executionCompleteButtonLabel(type) {
+    if (type === 'mask') return 'Complete and Unlock Workflow';
+    if (type === 'workflow' || type === 'refresh') return 'Complete and Review Results';
+    return 'Complete';
+  }
+
+  function diagnosticCard(title, value, ok, message, details = {}) {
+    return `
+      <div class="diagnostic-item ${ok ? 'diagnostic-ok' : 'diagnostic-warning'}">
+        <span>${escapeHtml(title)}</span>
+        <strong>${escapeHtml(value || '-')}</strong>
+        <p>${escapeHtml(message || 'Status is unknown.')}</p>
+        ${details.errorStatus || details.errorMessage ? `<p class="diagnostic-error">Status ${escapeHtml(details.errorStatus || 'unknown')}: ${escapeHtml(details.errorMessage)}</p>` : ''}
+        ${details.collections ? `<p class="diagnostic-list">${escapeHtml(details.collections.join(', '))}</p>` : ''}
+      </div>
+    `;
+  }
+
   function renderL4LComparisonVisualization() {
     const rows = state.l4lRows;
     const validation = state.l4lValidation || { valid: true, missingFields: [] };
 
     if (!rows.length) {
+      const emptyMessage = state.comparisonRefreshPending
+        ? 'Workflow completed. Domo may still be refreshing the output dataset. Click Refresh Results after the Domo dataset refresh completes.'
+        : 'No L4L comparison data is available. Run the Prepare L4L Comparison Facts Workflow first.';
       return `
         <section class="panel panel-wide phase2-panel">
           <div class="panel-heading">
             <h2>Store Performance — L4L Comparison</h2>
           </div>
-          ${emptyState('No L4L comparison data is available. Run the Prepare L4L Comparison Facts Workflow first.')}
+          ${emptyState(emptyMessage)}
           ${renderL4LDiagnostics()}
         </section>
       `;
@@ -392,7 +815,7 @@ export function createApp(root) {
         <section class="panel panel-wide phase2-panel">
           <div class="panel-heading">
             <h2>Store Performance — L4L Comparison</h2>
-            <button class="secondary" data-action="refresh-l4l-results" ${state.loading ? 'disabled' : ''}>Refresh Results</button>
+            <button type="button" class="secondary" data-action="refresh-l4l-results" ${state.loading ? 'disabled' : ''}>Refresh Results</button>
           </div>
           <p class="diagnostic-error">Missing required L4L comparison fields: ${escapeHtml(validation.missingFields.join(', '))}</p>
           ${renderL4LDiagnostics()}
@@ -402,41 +825,43 @@ export function createApp(root) {
 
     const context = inferComparisonContext(rows);
     const selectedSummary = calculateComparisonSummary(rows, { comparableCoverageOn: state.l4lComparableCoverageOn });
-    const coverageText = state.l4lComparableCoverageOn ? 'L4L ON' : 'L4L OFF';
+    const coverageMode = getCoverageModeLabel(state.l4lComparableCoverageOn);
 
     return `
-      <section class="panel panel-wide phase2-panel">
+      <section class="panel panel-wide phase2-panel result-board" aria-label="Result Board">
         <div class="panel-heading">
           <div>
-            <h2>Store Performance — L4L Comparison</h2>
+            <h2>Store Performance — L4L Comparison ${renderInfoTooltip('L4L ON applies Comparable Coverage. L4L OFF keeps all rows in the comparison window.')}</h2>
             <p class="note">Comparing ${escapeHtml(context.period_label_current || 'Current')} vs ${escapeHtml(context.period_label_prior || 'Prior')} · ${escapeHtml(context.metric_display_name || context.metric || 'Metric')} · ${escapeHtml(context.store_name || context.store_code || 'Store')}</p>
           </div>
-          <button class="secondary" data-action="refresh-l4l-results" ${state.loading ? 'disabled' : ''}>Refresh Results</button>
+          <button type="button" class="secondary" data-action="refresh-l4l-results" ${state.loading ? 'disabled' : ''}>Refresh Results</button>
         </div>
-        ${renderL4LDiagnostics()}
-        <div class="toggle-row" aria-label="Comparable Coverage">
-          <span>Comparable Coverage</span>
-          <div class="segmented-control">
-            <button class="${state.l4lComparableCoverageOn ? 'active' : ''}" data-action="set-l4l-on">L4L ON</button>
-            <button class="${state.l4lComparableCoverageOn ? '' : 'active'}" data-action="set-l4l-off">L4L OFF</button>
+        <div class="toggle-row" aria-label="Comparable Coverage mode">
+          <div>
+            <span>Comparable Coverage ${renderInfoTooltip(getTooltipCopy('comparableCoverage'))}</span>
+            <p class="note">${escapeHtml(coverageMode.description)}</p>
           </div>
+          <button type="button" class="switch-toggle ${state.l4lComparableCoverageOn ? 'switch-on' : ''}" role="switch" aria-checked="${state.l4lComparableCoverageOn ? 'true' : 'false'}" data-action="toggle-l4l-coverage">
+            <span class="switch-thumb"></span>
+            <strong>${escapeHtml(coverageMode.title)}</strong>
+          </button>
         </div>
-        <p class="note">L4L ON uses mask_include_flag = Y. L4L OFF uses all rows in the prepared comparison fact dataset.</p>
-        <h3>Main Result Summary (${escapeHtml(coverageText)})</h3>
+        ${renderComparableCoverageImpact(rows)}
+        <h3>Main KPI Summary (${escapeHtml(coverageMode.title)})</h3>
         <div class="metric-grid">
-          ${metric('Current Value', formatNumber(selectedSummary.current_value))}
+          ${metric('Current Value', formatNumber(selectedSummary.current_value), getTooltipCopy('l4lOn'))}
           ${metric('Prior Value', formatNumber(selectedSummary.prior_value))}
           ${metric('Absolute Variance', formatSignedNumber(selectedSummary.absolute_variance))}
-          ${metric('Variance %', selectedSummary.percent_change_display)}
+          ${metric('Variance %', selectedSummary.percent_change_display, getTooltipCopy('variancePercent'))}
           ${metric('Current Weeks', selectedSummary.included_current_weeks)}
           ${metric('Prior Weeks', selectedSummary.included_prior_weeks)}
           ${metric('Weeks Without Source Data', selectedSummary.weeks_without_source_data)}
           ${metric('Source Records Matched', selectedSummary.source_records_matched)}
           ${metric('Status', selectedSummary.comparison_status)}
         </div>
+        ${renderVarianceStatusExplanation(selectedSummary)}
+        ${renderComparisonScorecards(rows)}
         ${renderL4LResultComparisonTable(rows)}
-        ${renderExcludedCoverageWeeks(rows)}
-        ${renderL4LWeeklyDetail(rows)}
       </section>
     `;
   }
@@ -460,6 +885,7 @@ export function createApp(root) {
       <h3>Result Comparison</h3>
       <div class="table-wrap">
         <table>
+          <caption>L4L ON and L4L OFF comparison summary</caption>
           <thead>
             <tr>
               <th>Coverage Mode</th>
@@ -481,6 +907,79 @@ export function createApp(root) {
     `;
   }
 
+  function renderComparableCoverageImpact(rows) {
+    const onSummary = calculateComparisonSummary(rows, { comparableCoverageOn: true });
+    const offSummary = calculateComparisonSummary(rows, { comparableCoverageOn: false });
+    const excludedRows = getExcludedWeeks(rows);
+    const varianceImpact = onSummary.absolute_variance - offSummary.absolute_variance;
+    const topReason = topOutcomeReason(excludedRows);
+    const lowerHigher = varianceImpact < 0 ? 'lower' : varianceImpact > 0 ? 'higher' : 'the same as';
+
+    return `
+      <section class="impact-card" aria-label="Comparable Coverage Impact">
+        <div>
+          <p class="eyebrow">Comparable Coverage Impact</p>
+          <h3>${escapeHtml(formatSignedNumber(varianceImpact))}</h3>
+          <p class="note">L4L ON variance is ${escapeHtml(formatNumber(Math.abs(varianceImpact)))} ${escapeHtml(lowerHigher)} L4L OFF because ${escapeHtml(excludedRows.length)} week(s) were excluded, mainly due to ${escapeHtml(topReason)}.</p>
+        </div>
+        <div class="impact-metrics">
+          ${metric('Excluded Weeks', excludedRows.length, getTooltipCopy('excludedWeeks'))}
+          ${metric('Top Outcome Reason', topReason)}
+          ${metric('Selected Mode', getCoverageModeLabel(state.l4lComparableCoverageOn).title)}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderComparisonScorecards(rows) {
+    const onSummary = calculateComparisonSummary(rows, { comparableCoverageOn: true });
+    const offSummary = calculateComparisonSummary(rows, { comparableCoverageOn: false });
+
+    return `
+      <section class="comparison-scorecards" aria-label="L4L ON and L4L OFF scorecards">
+        ${renderComparisonScorecard('L4L ON', 'Governed Comparable Coverage', onSummary, 'Included Weeks')}
+        ${renderComparisonScorecard('L4L OFF', 'Inclusive Comparison Window', offSummary, 'Total Weeks')}
+      </section>
+    `;
+  }
+
+  function renderComparisonScorecard(title, subtitle, summary, weekLabel) {
+    const weekCount = Number(summary.included_current_weeks || 0) + Number(summary.included_prior_weeks || 0);
+    return `
+      <article class="scorecard">
+        <div class="scorecard-heading">
+          <div>
+            <h3>${escapeHtml(title)}</h3>
+            <p class="note">${escapeHtml(subtitle)}</p>
+          </div>
+          ${statusBadge(summary.comparison_status === 'OK' ? 'complete' : 'completed_unacknowledged')}
+        </div>
+        <div class="metric-grid compact-grid">
+          ${metric('Current', formatNumber(summary.current_value))}
+          ${metric('Prior', formatNumber(summary.prior_value))}
+          ${metric('Variance', formatSignedNumber(summary.absolute_variance))}
+          ${metric('Variance %', summary.percent_change_display)}
+          ${metric(weekLabel, weekCount)}
+        </div>
+      </article>
+    `;
+  }
+
+  function renderVarianceStatusExplanation(summary) {
+    const status = summary.comparison_status || 'OK';
+    if (status === 'OK') {
+      return '<p class="status-explainer"><strong>OK:</strong> Variance percentage is calculated from a non-zero prior value.</p>';
+    }
+
+    const explanations = {
+      PRIOR_ZERO: 'Prior value is zero, so variance percentage is not meaningful.',
+      BOTH_ZERO: 'Current and Prior are both zero, so variance percentage is not meaningful.',
+      WEEK_COUNT_MISMATCH: 'Current and Prior have different comparable week counts.'
+    };
+
+    return `<p class="status-explainer status-explainer-warning"><strong>${escapeHtml(status)}:</strong> ${escapeHtml(explanations[status] || 'Review comparison inputs before interpreting variance percentage.')}</p>`;
+  }
+
   function renderComparisonSummaryRow(label, summary) {
     return `
       <tr>
@@ -496,38 +995,126 @@ export function createApp(root) {
     `;
   }
 
+  function renderEvidenceTabs() {
+    const rows = state.l4lRows;
+    const tabs = [
+      ['excluded', 'Excluded Weeks'],
+      ['weekly', 'All Weekly Detail'],
+      ['validation', 'Validation'],
+      ['technical', 'Technical Details']
+    ];
+    const activeTab = state.activeEvidenceTab || 'excluded';
+
+    return `
+      <section class="evidence-tabs" aria-label="Evidence">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Evidence</p>
+            <h2>Coverage Evidence and Technical Context</h2>
+          </div>
+        </div>
+        <div class="tab-list" role="tablist" aria-label="Evidence views">
+          ${tabs.map(([id, label]) => `
+            <button type="button" class="tab-button ${activeTab === id ? 'tab-active' : ''}" role="tab" aria-selected="${activeTab === id ? 'true' : 'false'}" data-action="set-evidence-tab" data-tab="${escapeAttribute(id)}">
+              ${escapeHtml(label)}
+            </button>
+          `).join('')}
+        </div>
+        <div class="evidence-panel" role="tabpanel">
+          ${renderEvidencePanel(activeTab, rows)}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderEvidencePanel(activeTab, rows) {
+    if (activeTab === 'weekly') {
+      return rows.length && state.l4lValidation?.valid ? renderL4LWeeklyDetail(rows) : emptyState('Weekly detail is available after L4L comparison data is loaded.');
+    }
+    if (activeTab === 'validation') {
+      return `${renderSelectedScopeSummary()}${renderValidationSummary()}`;
+    }
+    if (activeTab === 'technical') {
+      return `${renderGlobalDatasetOverview()}${renderL4LDiagnostics()}`;
+    }
+    return rows.length && state.l4lValidation?.valid ? renderExcludedCoverageWeeks(rows) : emptyState('Excluded-week evidence is available after L4L comparison data is loaded.');
+  }
+
   function renderExcludedCoverageWeeks(rows) {
     const excludedRows = getExcludedWeeks(rows);
+    const filteredRows = filterExcludedRows(excludedRows);
+    const reasonOptions = unique(excludedRows.map((row) => row.final_reason_code || row.system_reason_code || row.manual_reason || 'Unknown'));
+    const currentExcluded = excludedRows.filter((row) => String(row.comparison_side).toLowerCase() === 'current').length;
+    const priorExcluded = excludedRows.filter((row) => String(row.comparison_side).toLowerCase() === 'prior').length;
+    const manualCount = excludedRows.filter((row) => String(row.manual_include_flag || '').toUpperCase() === 'N').length;
     return `
-      <h3>Weeks Excluded by Comparable Coverage</h3>
+      <h3>Weeks Excluded by Comparable Coverage ${renderInfoTooltip(getTooltipCopy('excludedWeeks'))}</h3>
+      <p class="note">These weeks are included when Comparable Coverage is OFF, but removed when L4L is ON.</p>
+      <div class="excluded-summary">
+        ${metric('Total Excluded Weeks', excludedRows.length)}
+        ${metric('Excluded Current Weeks', currentExcluded)}
+        ${metric('Excluded Prior Weeks', priorExcluded)}
+        ${metric('Manual Adjustments', manualCount)}
+        ${metric('Top Outcome Reason', topOutcomeReason(excludedRows))}
+      </div>
+      <div class="filter-bar" aria-label="Excluded weeks filters">
+        <label>
+          <span>Side</span>
+          <select data-action="filter-excluded-side">
+            ${['all', 'current', 'prior'].map((value) => `<option value="${value}" ${state.excludedFilters.side === value ? 'selected' : ''}>${escapeHtml(value === 'all' ? 'All' : value)}</option>`).join('')}
+          </select>
+        </label>
+        <label>
+          <span>Reason</span>
+          <select data-action="filter-excluded-reason">
+            <option value="all" ${state.excludedFilters.reason === 'all' ? 'selected' : ''}>All</option>
+            ${reasonOptions.map((reason) => `<option value="${escapeAttribute(reason)}" ${state.excludedFilters.reason === reason ? 'selected' : ''}>${escapeHtml(reason)}</option>`).join('')}
+          </select>
+        </label>
+        <button type="button" class="secondary ${state.excludedFilters.manualOnly ? 'filter-active' : ''}" data-action="toggle-manual-only">Manual only</button>
+        <button type="button" class="secondary ${state.excludedFilters.week53Only ? 'filter-active' : ''}" data-action="toggle-week53-only">Week 53 only</button>
+      </div>
+      ${renderReasonGuide()}
       ${excludedRows.length ? `
         <div class="table-wrap">
           <table>
+            <caption>Weeks excluded by Comparable Coverage and the reason each week was removed</caption>
             <thead>
               <tr>
-                <th>Period Type</th>
-                <th>Side</th>
-                <th>Slot</th>
-                <th>Financial Year</th>
-                <th>Week</th>
-                <th>Month</th>
+                <th>Comparison Side</th>
+                <th>Comparable Slot</th>
+                <th>Fiscal Year</th>
+                <th>Fiscal Week</th>
                 <th>Week Ending</th>
+                <th>Weekly Metric Value</th>
+                <th>Source Records</th>
+                <th>Trading Expectation</th>
+                <th>Manual Coverage Adjustment</th>
                 <th>Final CCM Outcome</th>
                 <th>Outcome Reason</th>
+                <th>Why Excluded</th>
               </tr>
             </thead>
             <tbody>
-              ${excludedRows.map((row) => `
+              ${filteredRows.map((row) => `
                 <tr>
-                  <td>${escapeHtml(row.period_type)}</td>
                   <td>${escapeHtml(row.comparison_side)}</td>
                   <td>${escapeHtml(row.comparable_week_slot ?? '-')}</td>
                   <td>${escapeHtml(row.financial_year || '-')}</td>
                   <td>${escapeHtml(row.week_of_year ?? '-')}</td>
-                  <td>${escapeHtml(row.month_of_year ?? '-')}</td>
                   <td>${escapeHtml(row.week_ending)}</td>
-                  <td>${escapeHtml(row.final_include_flag || row.mask_include_flag || '-')}</td>
-                  <td>${escapeHtml(row.final_reason_code || row.system_reason_code || '-')}</td>
+                  <td>${escapeHtml(formatNumber(row.source_value))}</td>
+                  <td>${escapeHtml(row.source_row_count ?? '-')}</td>
+                  <td>${flagBadge(row.system_include_flag || '-')}</td>
+                  <td>${flagBadge(row.manual_include_flag || '-')}</td>
+                  <td>${flagBadge(row.final_include_flag || row.mask_include_flag || '-')}</td>
+                  <td>${reasonBadge(row.final_reason_code || row.system_reason_code || '-')}</td>
+                  <td>
+                    <details class="row-reason">
+                      <summary>Why was this week excluded?</summary>
+                      <p>Trading expectation: ${escapeHtml(row.system_include_flag || '-')} · Manual adjustment: ${escapeHtml(row.manual_include_flag || '-')} · Final outcome: ${escapeHtml(row.final_include_flag || row.mask_include_flag || '-')} · Source records: ${escapeHtml(row.source_row_count ?? '-')} · ${escapeHtml(l4lPropagationImpact(row))}</p>
+                    </details>
+                  </td>
                 </tr>
               `).join('')}
             </tbody>
@@ -537,12 +1124,46 @@ export function createApp(root) {
     `;
   }
 
+  function renderReasonGuide() {
+    return `
+      <details class="reason-guide">
+        <summary>Reason guide</summary>
+        <dl>
+          <dt>WEEK_53_EXCLUDED</dt>
+          <dd>Week 53 is excluded from comparable-slot equivalence logic.</dd>
+          <dt>MANUAL_EXCLUDED</dt>
+          <dd>A user-approved manual coverage adjustment excluded this week.</dd>
+          <dt>PAIRED_SLOT_EXCLUSION</dt>
+          <dd>Current/prior paired slot was excluded to keep comparison alignment.</dd>
+          <dt>STORE_METRIC_WEEK_PROPAGATED_EXCLUSION</dt>
+          <dd>Same Store + Metric + Week exclusion applied anywhere that week appears.</dd>
+        </dl>
+      </details>
+    `;
+  }
+
+  function filterExcludedRows(rows) {
+    return (rows || []).filter((row) => {
+      const side = String(row.comparison_side || '').toLowerCase();
+      const reason = row.final_reason_code || row.system_reason_code || row.manual_reason || 'Unknown';
+      const manualFlag = String(row.manual_include_flag || '').toUpperCase();
+      const week = Number(row.week_of_year);
+
+      if (state.excludedFilters.side !== 'all' && side !== state.excludedFilters.side) return false;
+      if (state.excludedFilters.reason !== 'all' && reason !== state.excludedFilters.reason) return false;
+      if (state.excludedFilters.manualOnly && manualFlag !== 'N') return false;
+      if (state.excludedFilters.week53Only && week !== 53) return false;
+      return true;
+    });
+  }
+
   function renderL4LWeeklyDetail(rows) {
     const detailRows = getRowsForCoverageMode(rows, { comparableCoverageOn: state.l4lComparableCoverageOn });
     return `
       <h3>Weekly Detail</h3>
       <div class="table-wrap">
         <table>
+          <caption>All weekly comparison rows for the selected Comparable Coverage mode</caption>
           <thead>
             <tr>
               <th>Period Type</th>
@@ -594,12 +1215,13 @@ export function createApp(root) {
       <div class="table-controls" aria-label="Period table pagination">
         <span>Page ${escapeHtml(page.currentPage)} of ${escapeHtml(page.totalPages)} · Showing ${escapeHtml(page.startRow)}-${escapeHtml(page.endRow)} of ${escapeHtml(page.totalRows)} period week rows</span>
         <div class="button-row">
-          <button class="secondary" data-action="period-page-prev" ${page.currentPage <= 1 ? 'disabled' : ''}>Previous</button>
-          <button class="secondary" data-action="period-page-next" ${page.currentPage >= page.totalPages ? 'disabled' : ''}>Next</button>
+          <button type="button" class="secondary" data-action="period-page-prev" ${page.currentPage <= 1 ? 'disabled' : ''}>Previous</button>
+          <button type="button" class="secondary" data-action="period-page-next" ${page.currentPage >= page.totalPages ? 'disabled' : ''}>Next</button>
         </div>
       </div>
       <div class="table-wrap">
         <table>
+          <caption>Comparable week review and manual override editor</caption>
           <thead>
             <tr>
               <th>${escapeHtml(labels.periodLens)}</th>
@@ -643,7 +1265,7 @@ export function createApp(root) {
         <td>${escapeHtml(row.source_data_exists ?? 'Unknown')}</td>
         <td>${escapeHtml(row.system_include_flag)}</td>
         <td>
-          <button class="chip" data-action="toggle-override" data-week-ending="${escapeAttribute(row.week_ending)}" ${contextAttributes}>${escapeHtml(override.manual_include_flag)}</button>
+          <button type="button" class="chip" data-action="toggle-override" data-week-ending="${escapeAttribute(row.week_ending)}" ${contextAttributes}>${escapeHtml(override.manual_include_flag)}</button>
         </td>
         <td>${escapeHtml(row.effective_include_flag)}</td>
         <td>${escapeHtml(row.final_include_flag)}</td>
@@ -654,24 +1276,51 @@ export function createApp(root) {
   }
 
   function bindEvents() {
-    root.querySelector('[data-action="refresh-source"]')?.addEventListener('click', refreshSource);
+    bindAll('refresh-source', 'click', refreshSource);
     root.querySelector('[data-action="select-store"]')?.addEventListener('change', (event) => updateSelection({ storeCode: event.target.value }));
     root.querySelector('[data-action="select-metric"]')?.addEventListener('change', (event) => updateSelection({ metric: event.target.value }));
     root.querySelector('[data-action="select-period-type"]')?.addEventListener('change', (event) => {
+      markScopeChanged();
+      state.reviewConfirmed = false;
       state.selectedPeriodType = event.target.value;
       state.periodPage = 1;
       state.pendingWrite = null;
       state.status = `Selected Period Lens: ${state.selectedPeriodType}.`;
       render();
     });
-    root.querySelector('[data-action="save-overrides"]')?.addEventListener('click', saveOverrides);
-    root.querySelector('[data-action="generate-mask"]')?.addEventListener('click', generateMask);
-    root.querySelector('[data-action="run-l4l-workflow"]')?.addEventListener('click', runL4LWorkflow);
-    root.querySelector('[data-action="refresh-l4l-results"]')?.addEventListener('click', refreshL4LResults);
-    root.querySelector('[data-action="set-l4l-on"]')?.addEventListener('click', () => setL4LCoverageMode(true));
-    root.querySelector('[data-action="set-l4l-off"]')?.addEventListener('click', () => setL4LCoverageMode(false));
+    bindAll('save-overrides', 'click', saveOverrides);
+    bindAll('generate-mask', 'click', generateMask);
+    bindAll('run-l4l-workflow', 'click', runL4LWorkflow);
+    bindAll('refresh-l4l-results', 'click', refreshL4LResults);
+    bindAll('toggle-l4l-coverage', 'click', () => setL4LCoverageMode(!state.l4lComparableCoverageOn));
+    bindAll('toggle-diagnostics', 'click', toggleDiagnostics);
+    bindAll('close-diagnostics', 'click', closeDiagnostics);
+    root.querySelector('[data-action="complete-execution-modal"]')?.addEventListener('click', completeExecutionModal);
+    root.querySelector('[data-action="close-execution-modal"]')?.addEventListener('click', closeExecutionModal);
     root.querySelector('[data-action="confirm-appdb-write"]')?.addEventListener('click', confirmAppDbWrite);
     root.querySelector('[data-action="cancel-appdb-write"]')?.addEventListener('click', cancelAppDbWrite);
+    root.querySelectorAll('[data-action="set-evidence-tab"]').forEach((button) => {
+      button.addEventListener('click', () => {
+        state.activeEvidenceTab = button.dataset.tab || 'excluded';
+        render();
+      });
+    });
+    root.querySelector('[data-action="filter-excluded-side"]')?.addEventListener('change', (event) => {
+      state.excludedFilters.side = event.target.value;
+      render();
+    });
+    root.querySelector('[data-action="filter-excluded-reason"]')?.addEventListener('change', (event) => {
+      state.excludedFilters.reason = event.target.value;
+      render();
+    });
+    root.querySelector('[data-action="toggle-manual-only"]')?.addEventListener('click', () => {
+      state.excludedFilters.manualOnly = !state.excludedFilters.manualOnly;
+      render();
+    });
+    root.querySelector('[data-action="toggle-week53-only"]')?.addEventListener('click', () => {
+      state.excludedFilters.week53Only = !state.excludedFilters.week53Only;
+      render();
+    });
     root.querySelector('[data-action="period-page-prev"]')?.addEventListener('click', () => {
       state.periodPage = Math.max(1, state.periodPage - 1);
       render();
@@ -683,6 +1332,7 @@ export function createApp(root) {
     root.querySelectorAll('[data-action="toggle-override"]').forEach((button) => {
       button.addEventListener('click', () => {
         toggleManualOverride(button.dataset.weekEnding, periodContextFromDataset(button.dataset));
+        state.reviewConfirmed = false;
         render();
       });
     });
@@ -690,6 +1340,7 @@ export function createApp(root) {
     root.querySelectorAll('[data-action="edit-override-reason"]').forEach((input) => {
       input.addEventListener('change', () => {
         updateManualOverride(input.dataset.weekEnding, { manual_reason: input.value }, periodContextFromDataset(input.dataset));
+        state.reviewConfirmed = false;
         state.status = 'Manual coverage adjustment reason updated locally.';
         render();
       });
@@ -698,9 +1349,16 @@ export function createApp(root) {
     root.querySelectorAll('[data-action="edit-override-note"]').forEach((input) => {
       input.addEventListener('change', () => {
         updateManualOverride(input.dataset.weekEnding, { manual_note: input.value }, periodContextFromDataset(input.dataset));
+        state.reviewConfirmed = false;
         state.status = 'Manual coverage adjustment note updated locally.';
         render();
       });
+    });
+  }
+
+  function bindAll(action, eventName, handler) {
+    root.querySelectorAll(`[data-action="${action}"]`).forEach((element) => {
+      element.addEventListener(eventName, handler);
     });
   }
 
@@ -714,6 +1372,7 @@ export function createApp(root) {
       state.sourceProfile = sourceResult.profile;
       state.periodRows = periods.rows;
       state.periodPage = 1;
+      state.reviewConfirmed = false;
       if (!state.selectedStoreCode) state.selectedStoreCode = sourceResult.profile?.stores?.[0]?.store_code || '';
       if (!state.selectedMetric) state.selectedMetric = sourceResult.profile?.metrics?.[0]?.metric || '';
       if (!state.selectedPeriodType) state.selectedPeriodType = periods.rows[0]?.period_type || '';
@@ -730,6 +1389,12 @@ export function createApp(root) {
   }
 
   async function generateMask() {
+    if (!state.reviewConfirmed) {
+      state.error = 'Save Overrides to confirm Comparable Week Review before building the selected-scope mask.';
+      render();
+      return;
+    }
+
     const runId = createRunId();
     const generatedAt = new Date().toISOString();
     const store = selectedStore();
@@ -809,8 +1474,22 @@ export function createApp(root) {
 
     const { runRecord, maskRows } = state.lastRun;
     state.pendingWrite = null;
-    setLoading(`Clearing and rebuilding ${maskRows.length} selected-scope comparable week records...`);
+    state.loading = true;
+    state.executionModal = {
+      type: 'mask',
+      status: 'running',
+      currentStage: 2,
+      message: `Clearing and rebuilding ${maskRows.length} selected-scope comparable week records...`
+    };
+    state.status = `Rebuilding selected-scope mask output for ${runRecord.run_id}.`;
+    render();
     try {
+      state.executionModal = {
+        ...state.executionModal,
+        currentStage: 3,
+        message: `Writing ${maskRows.length} selected-scope mask record(s)...`
+      };
+      render();
       const result = await writeMaskRun({ runRecord, maskRows, dryRun: false });
       state.validationSummary = {
         ...state.validationSummary,
@@ -819,8 +1498,22 @@ export function createApp(root) {
         output_collection: result.runRecord.output_collection,
         rebuild_status: result.runRecord.rebuild_status
       };
+      state.stepCompletion.mask = true;
+      state.stepAcknowledged.mask = false;
+      state.stepAcknowledged.workflow = false;
+      state.scopeDirty = false;
+      state.l4lRows = [];
+      state.l4lValidation = { valid: true, missingFields: [] };
+      state.l4lMessage = 'Run the Workflow to prepare comparison facts for the rebuilt mask.';
       state.status = `Run ${runRecord.run_id} rebuilt selected-scope mask output.`;
       state.error = '';
+      state.executionModal = {
+        type: 'mask',
+        status: 'success',
+        currentStage: 5,
+        message: 'Selected-scope mask rebuild completed.',
+        resultSummary: `${result.maskRowsInserted} mask record(s) written after clearing ${result.maskRowsDeleted} existing selected-scope record(s).`
+      };
     } catch (error) {
       state.error = `Blocked during AppDB write: ${readableError(error)}`;
       state.validationSummary = {
@@ -828,6 +1521,13 @@ export function createApp(root) {
         rebuild_status: readableError(error).includes('clear') ? 'clear_failed' : 'failed'
       };
       state.status = 'Selected-scope rebuild failed. No fallback collection changes were attempted.';
+      state.executionModal = {
+        type: 'mask',
+        status: 'error',
+        currentStage: 3,
+        message: 'Selected-scope mask rebuild failed.',
+        errorMessage: readableError(error)
+      };
     } finally {
       state.loading = false;
       render();
@@ -835,6 +1535,10 @@ export function createApp(root) {
   }
 
   async function updateSelection({ storeCode = state.selectedStoreCode, metric = state.selectedMetric } = {}) {
+    if (storeCode !== state.selectedStoreCode || metric !== state.selectedMetric) {
+      markScopeChanged();
+      state.reviewConfirmed = false;
+    }
     state.selectedStoreCode = storeCode;
     state.selectedMetric = metric;
     state.periodPage = 1;
@@ -853,6 +1557,21 @@ export function createApp(root) {
       state.loading = false;
       render();
     }
+  }
+
+  function markScopeChanged() {
+    const hasGeneratedContext = state.stepCompletion.mask || state.stepAcknowledged.mask || state.stepAcknowledged.workflow || state.l4lRows.length;
+    state.reviewConfirmed = false;
+    if (!hasGeneratedContext) return;
+
+    state.scopeDirty = true;
+    state.stepCompletion.mask = false;
+    state.stepAcknowledged.mask = false;
+    state.stepAcknowledged.workflow = false;
+    state.l4lRows = [];
+    state.l4lValidation = { valid: true, missingFields: [] };
+    state.l4lMessage = 'Scope changed. Rebuild the selected-scope mask before preparing comparison facts.';
+    state.status = 'Scope changed. Rebuild the selected-scope mask before running the Workflow.';
   }
 
   async function loadOverridesForSelection() {
@@ -905,6 +1624,7 @@ export function createApp(root) {
         updatedBy: 'Domo app user'
       });
       state.manualOverrides = await loadOverridesForSelection();
+      state.reviewConfirmed = true;
       state.status = `Saved ${result.savedCount} manual coverage adjustment document(s).`;
       state.error = '';
     } catch (error) {
@@ -917,7 +1637,13 @@ export function createApp(root) {
   }
 
   async function runL4LWorkflow() {
-    setLoading('Running Prepare L4L Comparison Facts Workflow...');
+    if (!state.stepAcknowledged.mask) {
+      state.error = 'Build the selected-scope mask and click Complete before running the Workflow.';
+      render();
+      return;
+    }
+
+    state.loading = true;
     state.workflowProgress = {
       phase: 'starting',
       status: 'STARTING',
@@ -925,24 +1651,54 @@ export function createApp(root) {
       maxPollAttempts: 60,
       percent: 0
     };
+    state.executionModal = {
+      type: 'workflow',
+      status: 'running',
+      currentStage: 1,
+      message: 'Starting prepareL4LFacts through the mapped Domo Workflow alias.'
+    };
+    state.status = 'Running Prepare L4L Comparison Facts Workflow...';
     render();
     try {
       const result = await runPrepareL4LWorkflow({
         onProgress: (progress) => {
           state.workflowProgress = progress;
+          state.executionModal = {
+            type: 'workflow',
+            status: 'running',
+            currentStage: workflowStageFromProgress(progress),
+            message: workflowProgressMessage(progress)
+          };
           render();
         }
       });
       if (result.status === 'COMPLETED') {
-        const comparisonResult = await loadComparisonRows();
-        applyL4LResult(comparisonResult);
-        state.status = comparisonResult.empty
-          ? `${result.message} ${comparisonResult.message}`
-          : `${result.message} Loaded ${comparisonResult.rows.length} L4L comparison fact row(s).`;
+        state.comparisonRefreshPending = true;
+        state.workflowCompletedAt = new Date().toISOString();
+        state.l4lRows = [];
+        state.l4lValidation = { valid: true, missingFields: [] };
+        state.l4lMessage = 'Workflow completed. Domo may still be refreshing the output dataset. Click Refresh Results after the Domo dataset refresh completes.';
+        state.stepAcknowledged.workflow = false;
+        state.status = state.l4lMessage;
+        state.error = '';
+        state.executionModal = {
+          type: 'workflow',
+          status: 'success',
+          currentStage: 5,
+          message: 'Prepare L4L Comparison Facts completed. Domo may still be refreshing the output dataset.',
+          resultSummary: 'Click Refresh Results after the Domo dataset refresh completes. The app will not show previous-run comparison rows as new output.'
+        };
       } else {
         state.status = result.message;
+        state.executionModal = {
+          type: 'workflow',
+          status: ['START_FAILED', 'FAILED', 'CANCELED'].includes(result.status) ? 'error' : 'success',
+          currentStage: ['START_FAILED', 'FAILED', 'CANCELED'].includes(result.status) ? 1 : 2,
+          message: result.message,
+          errorMessage: ['START_FAILED', 'FAILED', 'CANCELED'].includes(result.status) ? result.message : ''
+        };
       }
-      state.l4lMessage = result.message;
+      state.l4lMessage = state.comparisonRefreshPending ? state.l4lMessage : result.message;
       if (['START_FAILED', 'FAILED', 'CANCELED'].includes(result.status)) {
         state.error = result.message;
       } else {
@@ -950,6 +1706,13 @@ export function createApp(root) {
       }
     } catch (error) {
       state.error = `Workflow trigger failed: ${readableError(error)}`;
+      state.executionModal = {
+        type: 'workflow',
+        status: 'error',
+        currentStage: 1,
+        message: 'Workflow trigger failed.',
+        errorMessage: readableError(error)
+      };
     } finally {
       state.loading = false;
       render();
@@ -957,14 +1720,52 @@ export function createApp(root) {
   }
 
   async function refreshL4LResults() {
-    setLoading('Refreshing L4L comparison results...');
+    state.loading = true;
+    state.executionModal = {
+      type: 'refresh',
+      status: 'running',
+      currentStage: 0,
+      message: 'Refreshing L4L comparison results through the mapped dataset alias.'
+    };
+    state.status = 'Refreshing L4L comparison results...';
+    render();
     try {
       const result = await loadComparisonRows();
+      state.executionModal = {
+        type: 'refresh',
+        status: 'running',
+        currentStage: 2,
+        message: 'Validating comparison rows and recalculating L4L summaries.'
+      };
+      render();
       applyL4LResult(result);
-      state.status = result.empty ? result.message : `Loaded ${result.rows.length} L4L comparison fact row(s).`;
+      state.status = result.empty && state.comparisonRefreshPending
+        ? 'Domo dataset refresh is not visible yet. Wait a few seconds, then click Refresh Results again.'
+        : result.empty ? result.message : `Loaded ${result.rows.length} L4L comparison fact row(s).`;
+      if (result.empty && state.comparisonRefreshPending) {
+        state.l4lMessage = state.status;
+      }
       state.error = '';
+      if (!result.empty && result.rows.length) {
+        state.comparisonRefreshPending = false;
+        state.stepAcknowledged.workflow = true;
+      }
+      state.executionModal = {
+        type: 'refresh',
+        status: 'success',
+        currentStage: 3,
+        message: 'L4L comparison results refreshed.',
+        resultSummary: result.empty ? result.message : `Loaded ${result.rows.length} L4L comparison fact row(s).`
+      };
     } catch (error) {
       state.error = `Unable to refresh L4L comparison results: ${readableError(error)}`;
+      state.executionModal = {
+        type: 'refresh',
+        status: 'error',
+        currentStage: 0,
+        message: 'L4L comparison result refresh failed.',
+        errorMessage: readableError(error)
+      };
     } finally {
       state.loading = false;
       render();
@@ -984,6 +1785,46 @@ export function createApp(root) {
     state.status = comparableCoverageOn
       ? 'Comparable Coverage set to L4L ON.'
       : 'Comparable Coverage set to L4L OFF.';
+    render();
+  }
+
+  function completeExecutionModal() {
+    if (state.executionModal?.type === 'mask') {
+      state.stepAcknowledged.mask = true;
+      state.status = 'Selected-scope mask is ready. Prepare L4L comparison facts next.';
+    }
+
+    if (state.executionModal?.type === 'workflow') {
+      state.stepAcknowledged.workflow = true;
+      state.status = state.comparisonRefreshPending
+        ? 'Workflow completed. Domo may still be refreshing the output dataset. Click Refresh Results after the Domo dataset refresh completes.'
+        : state.l4lRows.length
+          ? 'Comparison facts are ready. Review L4L results next.'
+          : 'Workflow completed. Refresh Results when the comparison dataset is available.';
+    }
+
+    if (state.executionModal?.type === 'refresh') {
+      state.status = state.l4lRows.length
+        ? 'L4L comparison results are ready.'
+        : state.l4lMessage || 'Refresh completed.';
+    }
+
+    state.executionModal = null;
+    render();
+  }
+
+  function closeExecutionModal() {
+    state.executionModal = null;
+    render();
+  }
+
+  function toggleDiagnostics() {
+    state.diagnosticsOpen = !state.diagnosticsOpen;
+    render();
+  }
+
+  function closeDiagnostics() {
+    state.diagnosticsOpen = false;
     render();
   }
 
@@ -1140,13 +1981,168 @@ export function createApp(root) {
   init();
 }
 
-function metric(label, value) {
+function loadPersistedUiState() {
+  if (typeof sessionStorage === 'undefined') return {};
+
+  try {
+    return JSON.parse(sessionStorage.getItem(CCM_UI_STATE_STORAGE_KEY) || '{}') || {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function persistUiState(state) {
+  if (typeof sessionStorage === 'undefined') return;
+
+  try {
+    sessionStorage.setItem(CCM_UI_STATE_STORAGE_KEY, JSON.stringify({
+      selectedStoreCode: state.selectedStoreCode,
+      selectedMetric: state.selectedMetric,
+      selectedPeriodType: state.selectedPeriodType,
+      periodPage: state.periodPage,
+      reviewConfirmed: state.reviewConfirmed,
+      comparisonRefreshPending: state.comparisonRefreshPending,
+      workflowCompletedAt: state.workflowCompletedAt,
+      scopeDirty: state.scopeDirty,
+      status: state.status,
+      l4lMessage: state.l4lMessage,
+      l4lComparableCoverageOn: state.l4lComparableCoverageOn,
+      diagnosticsOpen: state.diagnosticsOpen,
+      activeEvidenceTab: state.activeEvidenceTab,
+      excludedFilters: state.excludedFilters,
+      stepAcknowledged: state.stepAcknowledged,
+      stepCompletion: state.stepCompletion,
+      validationSummary: state.validationSummary
+    }));
+  } catch (_) {
+    // Storage can be unavailable in some embedded browser modes; the app should still run.
+  }
+}
+
+function resolveStoreCode(profile, preferredStoreCode) {
+  const stores = profile?.stores || [];
+  if (stores.some((store) => store.store_code === preferredStoreCode)) return preferredStoreCode;
+  return stores[0]?.store_code || '';
+}
+
+function resolveMetric(profile, preferredMetric) {
+  const metrics = profile?.metrics || [];
+  if (metrics.some((item) => item.metric === preferredMetric)) return preferredMetric;
+  return metrics[0]?.metric || '';
+}
+
+function resolvePeriodType(periodRows, preferredPeriodType) {
+  const periodTypes = unique((periodRows || []).map((row) => row.period_type));
+  if (periodTypes.includes(preferredPeriodType)) return preferredPeriodType;
+  return periodTypes[0] || '';
+}
+
+function initialStatusMessage({
+  recoveredAfterDomoRefresh = false,
+  l4lRowCount = 0,
+  comparisonRefreshPending = false,
+  sourceWarning = ''
+} = {}) {
+  if (recoveredAfterDomoRefresh) {
+    return `Domo dataset refresh detected. Loaded ${l4lRowCount} L4L comparison fact row(s).`;
+  }
+
+  if (comparisonRefreshPending) {
+    return 'Workflow completed. Domo may still be refreshing the output dataset. Click Refresh Results after the Domo dataset refresh completes.';
+  }
+
+  if (sourceWarning) return `Source loaded from mock mode: ${sourceWarning}`;
+  return 'Source summary loaded.';
+}
+
+function metric(label, value, tooltip = '') {
   return `
     <div class="metric">
-      <span>${escapeHtml(label)}</span>
+      <span>${escapeHtml(label)}${tooltip ? ` ${renderInfoTooltip(tooltip)}` : ''}</span>
       <strong>${escapeHtml(value)}</strong>
     </div>
   `;
+}
+
+function renderInfoTooltip(text) {
+  if (!text) return '';
+  return `
+    <span class="info-tooltip" tabindex="0" aria-label="${escapeAttribute(text)}">
+      i
+      <span class="tooltip-bubble" role="tooltip">${escapeHtml(text)}</span>
+    </span>
+  `;
+}
+
+function statusBadge(status) {
+  const label = statusLabel(status);
+  return `<span class="status-badge status-${escapeAttribute(status || 'unknown')}">${escapeHtml(label)}</span>`;
+}
+
+function statusLabel(status) {
+  if (status === 'ready') return 'Ready';
+  if (status === 'running') return 'Running';
+  if (status === 'complete') return 'Complete';
+  if (status === 'completed_unacknowledged') return 'Complete - Acknowledge';
+  if (status === 'error') return 'Error';
+  if (status === 'success') return 'Complete';
+  return 'Locked';
+}
+
+function stepStatusIcon(status, number) {
+  if (status === 'complete') return '✓';
+  if (status === 'completed_unacknowledged') return '!';
+  if (status === 'locked') return 'L';
+  if (status === 'error') return '!';
+  return number;
+}
+
+function stageIcon(state) {
+  if (state === 'done') return '✓';
+  if (state === 'current') return '...';
+  if (state === 'error') return '!';
+  return '-';
+}
+
+function workflowStageFromProgress(progress = {}) {
+  const status = String(progress.status || '').toUpperCase();
+  if (status === 'COMPLETED') return 3;
+  if (['FAILED', 'CANCELED', 'START_FAILED'].includes(status)) return 1;
+  if (progress.phase === 'started') return 2;
+  if (progress.phase === 'polling') return 2;
+  return 1;
+}
+
+function workflowProgressMessage(progress = {}) {
+  const status = progress.status || 'IN_PROGRESS';
+  const pollText = progress.maxPollAttempts
+    ? `Poll ${progress.attempt || 0} of ${progress.maxPollAttempts}`
+    : 'Starting';
+  return `Workflow status ${status}. ${pollText}.`;
+}
+
+function flagBadge(value) {
+  const flag = String(value || '-').trim().toUpperCase();
+  const label = flag === 'Y' ? 'Yes' : flag === 'N' ? 'No' : flag || '-';
+  return `<span class="flag-badge flag-${escapeAttribute(flag || 'unknown')}">${escapeHtml(label)}</span>`;
+}
+
+function reasonBadge(value) {
+  const reason = String(value || '-');
+  const isWeek53 = reason === 'WEEK_53_EXCLUDED';
+  const isManual = reason.includes('MANUAL');
+  const className = isWeek53 ? 'reason-week53' : isManual ? 'reason-manual' : 'reason-default';
+  return `<span class="reason-badge ${className}">${escapeHtml(reason)}</span>`;
+}
+
+function topOutcomeReason(rows) {
+  const counts = new Map();
+  for (const row of rows || []) {
+    const reason = row.final_reason_code || row.system_reason_code || row.manual_reason || 'Unknown';
+    counts.set(reason, (counts.get(reason) || 0) + 1);
+  }
+  const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+  return sorted[0]?.[0] || 'None';
 }
 
 function renderCountList(title, counts) {
@@ -1208,8 +2204,8 @@ function renderWriteConfirmation(pendingWrite) {
         </div>
         <p class="diagnostic-error">${escapeHtml(helperText.selectedScopeClear)} ${escapeHtml(COLLECTIONS.metricWeekOverrides)}, ${escapeHtml(COLLECTIONS.generationRuns)}, and ${escapeHtml(COLLECTIONS.fullMask)} will not be cleared.</p>
         <div class="button-row confirmation-actions">
-          <button class="secondary" data-action="cancel-appdb-write">Cancel</button>
-          <button class="primary danger" data-action="confirm-appdb-write">Confirm Rebuild</button>
+          <button type="button" class="secondary" data-action="cancel-appdb-write">Cancel</button>
+          <button type="button" class="primary danger" data-action="confirm-appdb-write">Confirm Rebuild</button>
         </div>
       </div>
     </section>
