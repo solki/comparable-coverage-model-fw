@@ -196,3 +196,23 @@ Version 1.0.2 does not map, clear, delete, or write this collection. Keep the Do
 ## Downstream Dataset
 
 The Phase 1 generated mask is selected-scope only. Downstream Workflow or Magic ETL should not be considered production-ready until full CCM mask generation writes `ccm_full_mask`.
+
+## Phase 2 Output Dataset Alias
+
+Phase 2 reads an existing output dataset through manifest alias `l4lComparisonFact`.
+
+Manual production mapping:
+
+`e5dffb5a-176f-4564-a147-c0d7311a6880`
+
+Dataset name:
+
+`DomoDev | Phase 2 Metric | L4L Weekly Comparison Fact`
+
+The frontend treats this dataset as read-only. It does not recreate, update, replace, or mutate the output dataset, Workflow, Magic ETL, DataFlow, source dataset, or AppDB collections for Phase 2 visualization.
+
+Expected row grain: prepared comparison fact rows with at least `comparison_side`, `metric`, `period_type`, `period_label_current`, `period_label_prior`, `store_code`, `store_name`, `region`, `week_ending`, `week_of_year`, `financial_year`, `source_value`, `source_row_count`, `system_include_flag`, `manual_include_flag`, `final_include_flag`, `mask_include_flag`, and `final_reason_code`.
+
+`comparable_week_slot` and `month_of_year` are recommended display fields. If the Domo dataset alias mapping does not expose them, the Phase 2 UI still loads the comparison result and displays `-` for those columns.
+
+Store, Metric, and Period Lens are inferred from the dataset because the current output contains only one of each.

@@ -172,6 +172,41 @@ sourceMetrics
 
 The Phase 1 generated mask is selected-scope only and lives in `ccm_selected_scope_mask`. Workflow and Magic ETL should not be considered production-ready until full CCM mask generation writes `ccm_full_mask`.
 
+## Phase 2 L4L Comparison Visualization
+
+Phase 2 consumes the existing Workflow/DataFlow output and renders a business-facing L4L comparison. The frontend does not create, modify, or publish Workflow, Magic ETL, source dataset, AppDB, or unrelated Domo objects.
+
+Existing Workflow:
+
+- Name: `Prepare L4L Comparison Facts`
+- ID: `55d72677-b9db-440a-967f-de606fad0a0c`
+- Version: `1.0.0`
+
+Workflow output dataset:
+
+- Name: `DomoDev | Phase 2 Metric | L4L Weekly Comparison Fact`
+- Dataset ID: `e5dffb5a-176f-4564-a147-c0d7311a6880`
+- App alias: `l4lComparisonFact`
+
+The app reads the output dataset through `l4lComparisonFact`. Store, Metric, and Period Lens are inferred because the current Phase 2 output contains only one store, one metric, and one period.
+
+Workflow triggering status:
+
+- The app can trigger this existing Workflow through manifest alias `prepareL4LFacts`.
+- The Workflow has no start-node input parameters, so the payload is `{}`.
+- The frontend uses `domo.workflow.start('prepareL4LFacts', {})`, then polls `domo.workflow.getInstance('prepareL4LFacts', instanceId)`.
+- Polling progress is shown in the UI until the Workflow reaches `COMPLETED`, `FAILED`, or `CANCELED`.
+- If `domo.workflow` is unavailable, the app shows manual instructions: run the Workflow manually in Domo, then click `Refresh Results`.
+- If the start endpoint returns HTTP 500, the app shows `START_FAILED` with the Domo error details. That means no Workflow instance id was returned, so there is nothing to poll; Domo-side workflow mapping, execution permission, and manual start behavior should be checked.
+
+Comparable Coverage logic:
+
+- L4L ON uses only rows where `mask_include_flag = Y`.
+- L4L OFF uses all rows in the comparison window.
+- Both views calculate Current Value, Prior Value, Absolute Variance, Variance %, included current/prior week counts, Weeks Without Source Data, Source Records Matched, and Comparison Status.
+- The app shows both the selected view and a side-by-side comparison between L4L ON and L4L OFF.
+- Weeks excluded by Comparable Coverage are shown with comparison side, comparable slot, fiscal week, weekly metric value, source records, Trading Expectation, Manual Coverage Adjustment, Final CCM Outcome, and Outcome Reason.
+
 ## Safety
 
 - The source dataset is read-only.

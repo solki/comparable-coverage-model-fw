@@ -1,6 +1,6 @@
 {
   "name": "Forty Winks CCM",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "fullpage": true,
   "size": {
     "width": 6,
@@ -11,9 +11,20 @@
       "alias": "sourceMetrics",
       "dataSetId": "86e3e588-91c3-487b-8d9f-d585dbdbaf10",
       "fields": []
+    },
+    {
+      "alias": "l4lComparisonFact",
+      "dataSetId": "e5dffb5a-176f-4564-a147-c0d7311a6880",
+      "fields": []
     }
   ],
-  "workflowMapping": [],
+  "workflowMapping": [
+    {
+      "alias": "prepareL4LFacts",
+      "modelId": "55d72677-b9db-440a-967f-de606fad0a0c",
+      "parameters": []
+    }
+  ],
   "packagesMapping": [],
   "fileName": "manifest.json",
   "collectionsMapping": [
@@ -186,7 +197,7 @@
     {
       "id": "5debc495-f14d-4ebf-b673-1306c19b7848",
       "name": "ccm_selected_scope_mask",
-      "syncEnabled": false,
+      "syncEnabled": true,
       "schema": {
         "columns": [
           {
@@ -339,7 +350,7 @@
     {
       "id": "bccc6282-7341-48a3-b3d3-055bfaddc5f9",
       "name": "ccm_full_mask",
-      "syncEnabled": false,
+      "syncEnabled": true,
       "schema": {
         "columns": [
           {
@@ -490,5 +501,14 @@
       }
     }
   ],
-  "id": "6c63e55d-14e0-40c8-9d88-81bb413ea72c"
+  "id": "6c63e55d-14e0-40c8-9d88-81bb413ea72c",
+  "workflowsMapping": [
+    {
+      "startName": "Prepare L4L Comparison Facts",
+      "alias": "prepareL4LFacts",
+      "modelId": "55d72677-b9db-440a-967f-de606fad0a0c",
+      "parameters": [],
+      "version": "1.0.0"
+    }
+  ]
 }

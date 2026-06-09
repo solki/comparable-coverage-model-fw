@@ -26,6 +26,20 @@ Production Domo dataset id for manual mapping:
 
 Do not hardcode this id in application logic.
 
+## Phase 2 L4L Comparison Dataset
+
+Use manifest alias `l4lComparisonFact` for the existing Workflow output dataset:
+
+`DomoDev | Phase 2 Metric | L4L Weekly Comparison Fact`
+
+Manual mapping dataset id:
+
+`e5dffb5a-176f-4564-a147-c0d7311a6880`
+
+Do not hardcode this id in frontend read logic. The app may document it in manifest/docs for manual mapping.
+
+Do not modify the Workflow, Magic ETL, DataFlow, source dataset, or AppDB collections for Phase 2 visualization. The existing Workflow can be triggered from the app through manifest alias `prepareL4LFacts` with no start-node input parameters. Use `domo.workflow.start('prepareL4LFacts', {})`, then poll `domo.workflow.getInstance('prepareL4LFacts', instanceId)`. If `domo.workflow` is unavailable, show: `Run the Workflow manually in Domo, then click Refresh Results.`
+
 ## AppDB Collections
 
 The app may use only these project-specific collections:
