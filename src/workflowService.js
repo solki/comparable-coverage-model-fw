@@ -139,7 +139,7 @@ function progressPercent(attempt, maxPollAttempts, status) {
 }
 
 function workflowStatusMessage(status) {
-  if (status === 'COMPLETED') return 'Workflow completed. Refreshing L4L comparison results.';
+  if (status === 'COMPLETED') return 'Workflow completed. Domo may still be refreshing the output dataset.';
   if (status === 'FAILED') return 'Workflow failed. Check the Workflow run details in Domo.';
   if (status === 'CANCELED') return 'Workflow was canceled. Check the Workflow run details in Domo.';
   return 'Workflow status is unknown.';
