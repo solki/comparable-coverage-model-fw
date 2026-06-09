@@ -1,0 +1,494 @@
+{
+  "name": "Forty Winks CCM",
+  "version": "1.0.3",
+  "fullpage": true,
+  "size": {
+    "width": 6,
+    "height": 4
+  },
+  "datasetsMapping": [
+    {
+      "alias": "sourceMetrics",
+      "dataSetId": "86e3e588-91c3-487b-8d9f-d585dbdbaf10",
+      "fields": []
+    }
+  ],
+  "workflowMapping": [],
+  "packagesMapping": [],
+  "fileName": "manifest.json",
+  "collectionsMapping": [
+    {
+      "id": "3f5836d0-b148-44ab-a462-de6fdecf4d8c",
+      "name": "ccm_metric_week_overrides",
+      "syncEnabled": false,
+      "schema": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "STRING"
+          },
+          {
+            "name": "store_code",
+            "type": "STRING"
+          },
+          {
+            "name": "store_name",
+            "type": "STRING"
+          },
+          {
+            "name": "region",
+            "type": "STRING"
+          },
+          {
+            "name": "metric",
+            "type": "STRING"
+          },
+          {
+            "name": "week_ending",
+            "type": "DATE"
+          },
+          {
+            "name": "manual_include_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "manual_reason",
+            "type": "STRING"
+          },
+          {
+            "name": "manual_note",
+            "type": "STRING"
+          },
+          {
+            "name": "updated_by",
+            "type": "STRING"
+          },
+          {
+            "name": "updated_at",
+            "type": "DATETIME"
+          },
+          {
+            "name": "active_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "source",
+            "type": "STRING"
+          },
+          {
+            "name": "version",
+            "type": "STRING"
+          }
+        ]
+      }
+    },
+    {
+      "id": "140f04d7-9536-448c-9a62-d0d5fd362c46",
+      "name": "ccm_generation_runs",
+      "syncEnabled": true,
+      "schema": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "STRING"
+          },
+          {
+            "name": "run_id",
+            "type": "STRING"
+          },
+          {
+            "name": "started_at",
+            "type": "DATETIME"
+          },
+          {
+            "name": "completed_at",
+            "type": "DATETIME"
+          },
+          {
+            "name": "status",
+            "type": "STRING"
+          },
+          {
+            "name": "generation_mode",
+            "type": "STRING"
+          },
+          {
+            "name": "output_collection",
+            "type": "STRING"
+          },
+          {
+            "name": "selected_store",
+            "type": "STRING"
+          },
+          {
+            "name": "selected_metric",
+            "type": "STRING"
+          },
+          {
+            "name": "selected_period_type",
+            "type": "STRING"
+          },
+          {
+            "name": "source_dataset_alias",
+            "type": "STRING"
+          },
+          {
+            "name": "source_row_count",
+            "type": "LONG"
+          },
+          {
+            "name": "store_count",
+            "type": "LONG"
+          },
+          {
+            "name": "period_count",
+            "type": "LONG"
+          },
+          {
+            "name": "period_week_count",
+            "type": "LONG"
+          },
+          {
+            "name": "mask_row_count",
+            "type": "LONG"
+          },
+          {
+            "name": "included_mask_row_count",
+            "type": "LONG"
+          },
+          {
+            "name": "excluded_store_count",
+            "type": "LONG"
+          },
+          {
+            "name": "mask_rows_deleted",
+            "type": "STRING"
+          },
+          {
+            "name": "mask_rows_inserted",
+            "type": "STRING"
+          },
+          {
+            "name": "rebuild_status",
+            "type": "STRING"
+          },
+          {
+            "name": "error_message",
+            "type": "STRING"
+          },
+          {
+            "name": "version",
+            "type": "STRING"
+          }
+        ]
+      }
+    },
+    {
+      "id": "5debc495-f14d-4ebf-b673-1306c19b7848",
+      "name": "ccm_selected_scope_mask",
+      "syncEnabled": false,
+      "schema": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "STRING"
+          },
+          {
+            "name": "run_id",
+            "type": "STRING"
+          },
+          {
+            "name": "generated_at",
+            "type": "DATETIME"
+          },
+          {
+            "name": "generation_mode",
+            "type": "STRING"
+          },
+          {
+            "name": "output_collection",
+            "type": "STRING"
+          },
+          {
+            "name": "inclusion_key",
+            "type": "STRING"
+          },
+          {
+            "name": "active_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "period_type",
+            "type": "STRING"
+          },
+          {
+            "name": "period_label_current",
+            "type": "STRING"
+          },
+          {
+            "name": "period_label_prior",
+            "type": "STRING"
+          },
+          {
+            "name": "comparison_side",
+            "type": "STRING"
+          },
+          {
+            "name": "comparable_week_slot",
+            "type": "LONG"
+          },
+          {
+            "name": "store_code",
+            "type": "STRING"
+          },
+          {
+            "name": "store_name",
+            "type": "STRING"
+          },
+          {
+            "name": "region",
+            "type": "STRING"
+          },
+          {
+            "name": "metric",
+            "type": "STRING"
+          },
+          {
+            "name": "week_ending",
+            "type": "DATE"
+          },
+          {
+            "name": "week_of_year",
+            "type": "LONG"
+          },
+          {
+            "name": "month_of_year",
+            "type": "LONG"
+          },
+          {
+            "name": "financial_year",
+            "type": "STRING"
+          },
+          {
+            "name": "system_include_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "manual_include_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "effective_include_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "paired_slot_include_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "final_include_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "mask_include_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "is_manual_override",
+            "type": "STRING"
+          },
+          {
+            "name": "manual_reason",
+            "type": "STRING"
+          },
+          {
+            "name": "system_reason_code",
+            "type": "STRING"
+          },
+          {
+            "name": "final_reason_code",
+            "type": "STRING"
+          },
+          {
+            "name": "store_trading_commencement_date",
+            "type": "DATE"
+          },
+          {
+            "name": "store_closure_date",
+            "type": "DATE"
+          },
+          {
+            "name": "current_period_start_date",
+            "type": "DATE"
+          },
+          {
+            "name": "current_period_end_date",
+            "type": "DATE"
+          },
+          {
+            "name": "source",
+            "type": "STRING"
+          },
+          {
+            "name": "version",
+            "type": "STRING"
+          }
+        ]
+      }
+    },
+    {
+      "id": "bccc6282-7341-48a3-b3d3-055bfaddc5f9",
+      "name": "ccm_full_mask",
+      "syncEnabled": false,
+      "schema": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "STRING"
+          },
+          {
+            "name": "run_id",
+            "type": "STRING"
+          },
+          {
+            "name": "generated_at",
+            "type": "DATETIME"
+          },
+          {
+            "name": "generation_mode",
+            "type": "STRING"
+          },
+          {
+            "name": "output_collection",
+            "type": "STRING"
+          },
+          {
+            "name": "inclusion_key",
+            "type": "STRING"
+          },
+          {
+            "name": "active_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "period_type",
+            "type": "STRING"
+          },
+          {
+            "name": "period_label_current",
+            "type": "STRING"
+          },
+          {
+            "name": "period_label_prior",
+            "type": "STRING"
+          },
+          {
+            "name": "comparison_side",
+            "type": "STRING"
+          },
+          {
+            "name": "comparable_week_slot",
+            "type": "LONG"
+          },
+          {
+            "name": "store_code",
+            "type": "STRING"
+          },
+          {
+            "name": "store_name",
+            "type": "STRING"
+          },
+          {
+            "name": "region",
+            "type": "STRING"
+          },
+          {
+            "name": "metric",
+            "type": "STRING"
+          },
+          {
+            "name": "week_ending",
+            "type": "DATE"
+          },
+          {
+            "name": "week_of_year",
+            "type": "LONG"
+          },
+          {
+            "name": "month_of_year",
+            "type": "LONG"
+          },
+          {
+            "name": "financial_year",
+            "type": "STRING"
+          },
+          {
+            "name": "system_include_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "manual_include_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "effective_include_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "paired_slot_include_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "final_include_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "mask_include_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "is_manual_override",
+            "type": "STRING"
+          },
+          {
+            "name": "manual_reason",
+            "type": "STRING"
+          },
+          {
+            "name": "system_reason_code",
+            "type": "STRING"
+          },
+          {
+            "name": "final_reason_code",
+            "type": "STRING"
+          },
+          {
+            "name": "store_trading_commencement_date",
+            "type": "DATE"
+          },
+          {
+            "name": "store_closure_date",
+            "type": "DATE"
+          },
+          {
+            "name": "current_period_start_date",
+            "type": "DATE"
+          },
+          {
+            "name": "current_period_end_date",
+            "type": "DATE"
+          },
+          {
+            "name": "source",
+            "type": "STRING"
+          },
+          {
+            "name": "version",
+            "type": "STRING"
+          }
+        ]
+      }
+    }
+  ],
+  "id": "6c63e55d-14e0-40c8-9d88-81bb413ea72c"
+}

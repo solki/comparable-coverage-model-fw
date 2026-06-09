@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.DS_Store
+.env
+.env.*
+
+# Domo CLI local/runtime artifacts
+.domo/
+
+# Local validation outputs may contain environment-specific source samples
+MISC/source-aggregate-validation-result.json

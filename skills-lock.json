@@ -1,0 +1,245 @@
+{
+  "version": 1,
+  "skills": {
+    "ai-service-layer": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/ai-service-layer/SKILL.md",
+      "computedHash": "09b9446042efe4ac943183422e2cddae5d7bbc7c7278c561eef04f4541577a89"
+    },
+    "app-studio-build": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/app-studio/app-studio-build/SKILL.md",
+      "computedHash": "89026a15e33e30468b36d7d83844b5581d72b4e71d3f2d37fd82075a25f9be84"
+    },
+    "appdb": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/appdb/SKILL.md",
+      "computedHash": "e213e26afb2a670ceba90a26f474d342d9fa8f2dca6e0735fd9f139484733364"
+    },
+    "appdb-collection-create": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/cli/appdb-collection-create/SKILL.md",
+      "computedHash": "2225c8cde0678d95985de7c9971f42b971ec26acdc5c05830f912e4c7c7d26ca"
+    },
+    "basic-custom-app-build": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/(demo-skills)/basic-custom-app-build/SKILL.md",
+      "computedHash": "51f48ac654217499cf65eef7fd17afb7fd19a953de564408cea713a73474c520"
+    },
+    "basic-custom-app-build-w-video": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/(demo-skills)/basic-custom-app-build-w-video/SKILL.md",
+      "computedHash": "d62d3b6e14e6551ecbad683b50e3b671f62e29f1648f8acc951e9988ae2ebba2"
+    },
+    "beast-mode-creation": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/app-studio/beast-mode-creation/SKILL.md",
+      "computedHash": "03d2801d94330d0f097bb81bb64b9ac6e4552c9a864af3c1d1742aaa0c23310b"
+    },
+    "card-creation": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/app-studio/card-creation/SKILL.md",
+      "computedHash": "fc7e8d0286620f7a59de72398e9c2d454b237966a546190c93c1104afa6f7fb0"
+    },
+    "code-engine": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/code-engine/SKILL.md",
+      "computedHash": "f61535850ab4b20a3b46f6d0aa3ae37037924cdba601a55da0fddcf881eff4e7"
+    },
+    "code-engine-create": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/cli/code-engine-create/SKILL.md",
+      "computedHash": "f8db72fbdae9ffc3471fcb919ffdc792872337e72af1d0039b9b2a14656b82cc"
+    },
+    "code-engine-update": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/cli/code-engine-update/SKILL.md",
+      "computedHash": "ce9f7ab7a3a81da9fb22ba1641d5b993b7b165daa674c1226c4b7ba7802dfbfd"
+    },
+    "community-cli-howto": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/cli/community-cli-howto/SKILL.md",
+      "computedHash": "0f8f8cc1b31d7dd7138f7c6cd3621c6d93320414fe96dd6f99ebb6ff1f3782e6"
+    },
+    "connector-dev": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/connectors/connector-dev/SKILL.md",
+      "computedHash": "22588d2773cbe30c4d895627cf0b835499b6efa5ccf0758a531be35d31d92b2f"
+    },
+    "da-cli": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/da-cli/SKILL.md",
+      "computedHash": "102f29e500aad3af7f481dd18fc6eb9dae615258029e5b6e265f57b3d76935da"
+    },
+    "data-api": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/data-api/SKILL.md",
+      "computedHash": "6de43508d10ba6c74c8fcfa822a29577229a72a16c1918eb3f156dc11ddcd205"
+    },
+    "data-upload-java-cli": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/connectors/data-upload-java-cli/SKILL.md",
+      "computedHash": "e6b10b78c50b92b0c8fa1c0574b20a6539a220d3b11ad96e5cb4b78cfef87602"
+    },
+    "dataset-query": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/dataset-query/SKILL.md",
+      "computedHash": "b1ad6cf3cc5758ca3f02d3e6cae8e5e003ef3298ed7ac7adf59b2d6ded6a3f08"
+    },
+    "domo-app-theme": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/themes/domo-app-theme/SKILL.md",
+      "computedHash": "7b087583ff4aa44a5926a78b95fe18776c6b52c205904bc943d98c863f1b494a"
+    },
+    "domo-data-generator": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/datagen/domo-data-generator/SKILL.md",
+      "computedHash": "c772a3c8d36214716ac2387b32324f49f917b44d93fb90da638d51f5dc919886"
+    },
+    "domo-js": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/domo-js/SKILL.md",
+      "computedHash": "451ecba71d442dd9fc06881048e8c21671dde1f270a15969bf21c147477e1549"
+    },
+    "edit-embed": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/domo-everywhere/edit-embed/SKILL.md",
+      "computedHash": "60fe06c80bce919b448203a73005fb783643ed0aa49e5171c156b147ef5b92b0"
+    },
+    "embed-portal": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/domo-everywhere/embed-portal/SKILL.md",
+      "computedHash": "eed80dc983e235d2978a76b547fae8c9758fb4275b79ab784b0b5b0443bf0067"
+    },
+    "fileset-api": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/fileset-api/SKILL.md",
+      "computedHash": "84f66722e2b3ec02b84f8846271bc4a314c4106997b442622e704fa26ea82df5"
+    },
+    "fileset-cli": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/cli/filesets/SKILL.md",
+      "computedHash": "6ebbdbe5364f5a01c78e4c731cc70b7f3ca993839f2285f222006326f1055a0f"
+    },
+    "html-deck": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/documents/html-deck/SKILL.md",
+      "computedHash": "1a5dce3a313bb674554397f749d1039bf2941a2f352c5b55c4719c751ba1d7c5"
+    },
+    "jsapi-filters": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/domo-everywhere/jsapi-filters/SKILL.md",
+      "computedHash": "d3d51ffea984d27b171eda8b75b048186577e167305fcb35f7307a01b9f9e901"
+    },
+    "json-no-code-connector": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/connectors/json-no-code-connector/SKILL.md",
+      "computedHash": "10c86ecbef968d81be42a8f8b476968be576e9991e98d3312c1456b772fa43d7"
+    },
+    "magic-etl": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/transformation/magic-etl/SKILL.md",
+      "computedHash": "ec0813f11d09884b32578cc93ce8a4ae996e18eea7a11d8922a3bf8b448ba394"
+    },
+    "magic-etl-cli": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/transformation/magic-etl-cli/SKILL.md",
+      "computedHash": "66815113d622e4c516302b6d96cc001581150b0f8728dff4a3f7db7714b0fedd"
+    },
+    "manifest": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/manifest/SKILL.md",
+      "computedHash": "293a07b16206e02cc14be8bcb0705f43c4eb78e2b65216479a34b2d24ab02663"
+    },
+    "migrate-googleai": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/migrate-googleai/SKILL.md",
+      "computedHash": "4edbfbe6d4e3ac2d73850b96b5727303c8b9c5570fd6a3b47345b3c36f45d358"
+    },
+    "migrate-lovable": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/migrate-lovable/SKILL.md",
+      "computedHash": "4adcfb3d366dcc2234bca42d2f5e64d1fd4e0979074f8b18a40a11794c7f6a4e"
+    },
+    "performance": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/performance/SKILL.md",
+      "computedHash": "2d7da90689f1570786a8394b4695ad9ea9393713eece73df0e96cc01199aa53d"
+    },
+    "programmatic-filters": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/domo-everywhere/programmatic-filters/SKILL.md",
+      "computedHash": "2c832a44231fa7b5ae0cf2c7a0e4a375ec693b4364c316ddd03140fcc1f101bf"
+    },
+    "publish": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/publish/SKILL.md",
+      "computedHash": "5f907565d5840bf48e989f960416b7c83762dd03cd648af60d9ba9794ea6b153"
+    },
+    "sql-query": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/sql-query/SKILL.md",
+      "computedHash": "da20751940ef3882a1fb878d92f5eff98ec27ed67f01b4b33e50a5c35195e60b"
+    },
+    "toolkit": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/toolkit/SKILL.md",
+      "computedHash": "d77fc3b5459d5c74dd4fe28b830f9db59ee21e232d2a53153eace411bf6f9dc6"
+    },
+    "variable-creation": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/app-studio/variable-creation/SKILL.md",
+      "computedHash": "4984a332d2ba8e2f469c07d18760759142461a5e1ff4ac7f4b48b9a5f4fb765e"
+    },
+    "workflow": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/custom-apps/workflow/SKILL.md",
+      "computedHash": "29f27fd6506cf42aa33830f1a136ddfe78a66856d075f2652ecfa518b9c078db"
+    },
+    "workspaces": {
+      "source": "stahura/domo-ai-vibe-rules",
+      "sourceType": "github",
+      "skillPath": "skills/administration/workspaces/SKILL.md",
+      "computedHash": "86004f84e9d50a778efd819c317386a67dc61ac22740a49e5e489f391460f4a5"
+    }
+  }
+}
