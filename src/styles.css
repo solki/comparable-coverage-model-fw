@@ -249,7 +249,18 @@ button.danger-outline {
 }
 
 .next-action-control {
+  display: flex;
   flex: 0 0 auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.next-action-hint {
+  max-width: 180px;
+  color: var(--color-muted);
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: right;
 }
 
 .stale-data-banner {
@@ -484,6 +495,11 @@ button.danger-outline {
 
 .step-card {
   border-color: rgba(34, 211, 238, 0.24);
+}
+
+.run-complete-panel {
+  border-color: rgba(34, 197, 94, 0.34);
+  background: linear-gradient(135deg, rgba(20, 83, 45, 0.24), rgba(14, 23, 38, 0.9));
 }
 
 .panel-heading,

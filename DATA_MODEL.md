@@ -20,13 +20,19 @@ Derived fields:
 
 | Field | Meaning |
 | --- | --- |
-| `period_type` | Period Lens: one of `Last Week`, `Last Month`, `Last Quarter`, `Year to Date`. |
+| `period_type` | Period Lens: one of `Last Completed Week`, `Last Completed Month`, `Last Completed Quarter`, `Year To Date`, `Quarter To Date`, `Month To Date`. |
+| `period_lens` | Runtime alias of Period Lens for future production handoff. Not persisted in current AppDB schema. |
+| `comparison_mode` | Fixed derived comparison mode: `Previous Period` or `Same Period Last Year`. Not persisted in current AppDB schema. |
+| `history_offset` | Runtime comparison offset. Current implementation uses `1`; `comparison_mode` defines whether this means previous period or previous fiscal year. |
+| `comparison_window_id` | Runtime identifier for Period Lens + comparison mode. |
 | `period_label_current` | Current-side display label. |
 | `period_label_prior` | Prior-side display label. |
 | `comparison_side` | Comparison Side: `current` or `prior`. |
 | `comparable_week_slot` | Comparable Slot between current and prior fiscal weeks. |
+| `comparable_slot` | Runtime alias of `comparable_week_slot` for future production handoff. |
 | `week_ending` | Fiscal week ending date. |
 | `week_of_year` | Source fiscal week number. |
+| `fiscal_week` | Runtime alias of `week_of_year` for future production handoff. |
 | `month_of_year` | Source fiscal month number. |
 | `financial_year` | Source financial year label. |
 | `current_period_start_date` | Start date used for system store inclusion checks. |
@@ -57,7 +63,7 @@ Weekly Coverage Records power the selected-scope summary and Comparable Week Rev
 
 Global Dataset Overview fields are unfiltered totals for the mapped `sourceMetrics` alias.
 
-Selected Scope Summary fields are filtered to the current Store + Metric + Period Lens selection:
+Selected Scope Summary fields are filtered to the current Store selection, selected Metric list, and Period Lens selection:
 
 - selected source records
 - weekly coverage records
@@ -75,8 +81,8 @@ Validation Summary is also selected-scope only and must not reuse global missing
 
 Phase 1 writes only selected-scope output:
 
-- selected Store
-- selected Metric
+- selected Store, or all stores when `All Stores` is chosen in the UI
+- one or more selected Metrics
 - selected Period Lens
 
 Each selected-scope rebuild clears `ccm_selected_scope_mask` before inserting the new selected-scope rows. During Phase 1 prototype validation, `ccm_selected_scope_mask` therefore contains only the latest selected-scope generated output, not a full CCM mask.
@@ -128,6 +134,8 @@ If a user marks Store + Metric + Fiscal Week as `N`, that exclusion applies wher
 Grain: `period_type + comparison_side + comparable_week_slot + store_code + metric + week_ending`
 
 Phase 1 storage semantics: current generated output only. Rebuild Selected Scope clears the collection, then inserts only selected Store + Metric + Period Lens mask records. This prevents duplicates across repeated selected-scope generation runs.
+
+The current AppDB schema remains backward compatible and does not persist the runtime-only future handoff fields `period_lens`, `comparison_mode`, `history_offset`, `comparison_window_id`, `fiscal_week`, or `comparable_slot`.
 
 | Field | Meaning |
 | --- | --- |
@@ -215,4 +223,4 @@ Expected row grain: prepared comparison fact rows with at least `comparison_side
 
 `comparable_week_slot` and `month_of_year` are recommended display fields. If the Domo dataset alias mapping does not expose them, the Phase 2 UI still loads the comparison result and displays `-` for those columns.
 
-Store, Metric, and Period Lens are inferred from the dataset because the current output contains only one of each.
+Store, Metric, and Period Lens are inferred from the dataset where possible. Broad selected-scope runs may produce multiple stores or metrics, so downstream comparison outputs should preserve explicit Store, Metric, and Period Lens fields.

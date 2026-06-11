@@ -1,13 +1,23 @@
-import { COMPARISON_SIDE, FLAGS, PERIOD_LABELS, PERIOD_TYPES } from './constants.js';
+import {
+  COMPARISON_SIDE,
+  FLAGS,
+  PERIOD_COMPARISON_MODES,
+  PERIOD_LABELS,
+  PERIOD_TYPES
+} from './constants.js';
 import { addDays, cleanString, maxDate, minDate, normalizeDate, subtractDays } from './dateUtils.js';
+
+const FISCAL_WEEKS_PER_QUARTER = 13;
 
 export function deriveRuntimePeriodDefinitions(sourceRows) {
   const rows = Array.isArray(sourceRows) ? sourceRows : [];
   const definitions = [
-    ...deriveLastWeek(rows),
-    ...deriveLastMonth(rows),
-    ...deriveLastQuarter(rows),
-    ...deriveYearToDate(rows)
+    ...deriveLastCompletedWeek(rows),
+    ...deriveLastCompletedMonth(rows),
+    ...deriveLastCompletedQuarter(rows),
+    ...deriveYearToDate(rows),
+    ...deriveQuarterToDate(rows),
+    ...deriveMonthToDate(rows)
   ];
 
   return definitions.map((definition, index) => ({
@@ -38,38 +48,60 @@ export function validatePeriodDefinitions(periodRows) {
   return { valid: errors.length === 0, errors, warnings };
 }
 
-function deriveLastWeek(rows) {
-  const currentFyRows = rows.filter((row) => isYes(row['FC Current FY Flag']));
-  const maxWeek = maxNumber(currentFyRows.map((row) => row['Week Of Year']));
-  const currentRows = currentFyRows.filter((row) => numberValue(row['Week Of Year']) === maxWeek - 1);
-  const priorRows = currentFyRows.filter((row) => numberValue(row['Week Of Year']) === maxWeek - 2);
-  return rowsToDefinitions(PERIOD_TYPES.lastWeek, currentRows, priorRows);
+function deriveLastCompletedWeek(rows) {
+  const currentFyRows = currentFiscalRows(rows);
+  const targetWeek = targetCompletedWeek(rows);
+  const currentRows = currentFyRows.filter((row) => numberValue(row['Week Of Year']) === targetWeek);
+  const priorRows = currentFyRows.filter((row) => numberValue(row['Week Of Year']) === targetWeek - 1);
+  return rowsToDefinitions(PERIOD_TYPES.lastCompletedWeek, currentRows, priorRows);
 }
 
-function deriveLastMonth(rows) {
+function deriveLastCompletedMonth(rows) {
   const lastMonthRows = rows.filter((row) => isYes(row['FC Last Month Flag']));
   const currentMonth = maxNumber(lastMonthRows.map((row) => row['Month of Year']));
-  const currentRows = selectRowsForMonths(rows, [currentMonth]);
-  const priorRows = selectRowsForMonths(rows, [previousFiscalMonth(currentMonth, 1)]);
-  return rowsToDefinitions(PERIOD_TYPES.lastMonth, currentRows, priorRows);
+  const currentRows = selectRowsForMonths(rows, [currentMonth], { preferCurrentFy: true });
+  const priorRows = selectRowsForMonths(rows, [previousFiscalMonth(currentMonth, 1)], { preferCurrentFy: true });
+  return rowsToDefinitions(PERIOD_TYPES.lastCompletedMonth, currentRows, priorRows);
 }
 
-function deriveLastQuarter(rows) {
-  const currentMonthRows = rows.filter((row) => isYes(row['FC Current Month Flag']));
-  const anchorMonth = maxNumber(currentMonthRows.map((row) => row['Month of Year']));
-  const currentMonths = [1, 2, 3].map((offset) => previousFiscalMonth(anchorMonth, offset));
-  const priorMonths = [4, 5, 6].map((offset) => previousFiscalMonth(anchorMonth, offset));
-  const currentRows = selectRowsForMonths(rows, currentMonths);
-  const priorRows = selectRowsForMonths(rows, priorMonths);
-  return rowsToDefinitions(PERIOD_TYPES.lastQuarter, currentRows, priorRows);
+function deriveLastCompletedQuarter(rows) {
+  const currentFyRows = currentFiscalRows(rows);
+  const targetWeek = targetCompletedWeek(rows);
+  const currentStartWeek = targetWeek - FISCAL_WEEKS_PER_QUARTER + 1;
+  const priorEndWeek = currentStartWeek - 1;
+  const priorStartWeek = priorEndWeek - FISCAL_WEEKS_PER_QUARTER + 1;
+
+  const currentRows = rowsBetweenWeeks(currentFyRows, currentStartWeek, targetWeek);
+  const priorRows = rowsBetweenWeeks(currentFyRows, priorStartWeek, priorEndWeek);
+  return rowsToDefinitions(PERIOD_TYPES.lastCompletedQuarter, currentRows, priorRows);
 }
 
 function deriveYearToDate(rows) {
-  const currentFyRows = rows.filter((row) => isYes(row['FC Current FY Flag']));
-  const targetWeek = maxNumber(currentFyRows.map((row) => row['Week Of Year'])) - 1;
-  const currentRows = currentFyRows.filter((row) => numberValue(row['Week Of Year']) <= targetWeek);
-  const priorRows = rows.filter((row) => isYes(row['FC Last FY Flag']) && numberValue(row['Week Of Year']) <= targetWeek);
+  const targetWeek = targetCompletedWeek(rows);
+  const currentRows = rowsBetweenWeeks(currentFiscalRows(rows), 1, targetWeek);
+  const priorRows = rowsBetweenWeeks(lastFiscalRows(rows), 1, targetWeek);
   return rowsToDefinitions(PERIOD_TYPES.yearToDate, currentRows, priorRows);
+}
+
+function deriveQuarterToDate(rows) {
+  const targetWeek = targetCompletedWeek(rows);
+  const quarterStartWeek = quarterStartForWeek(targetWeek);
+  const currentRows = rowsBetweenWeeks(currentFiscalRows(rows), quarterStartWeek, targetWeek);
+  const priorRows = rowsBetweenWeeks(lastFiscalRows(rows), quarterStartWeek, targetWeek);
+  return rowsToDefinitions(PERIOD_TYPES.quarterToDate, currentRows, priorRows);
+}
+
+function deriveMonthToDate(rows) {
+  const targetWeek = targetCompletedWeek(rows);
+  const currentMonthRows = rows.filter((row) => isYes(row['FC Current Month Flag']));
+  const currentMonth = maxNumber(currentMonthRows.map((row) => row['Month of Year']));
+  const currentRows = currentFiscalRows(rows)
+    .filter((row) => numberValue(row['Month of Year']) === currentMonth)
+    .filter((row) => numberValue(row['Week Of Year']) <= targetWeek);
+  const priorRows = lastFiscalRows(rows)
+    .filter((row) => numberValue(row['Month of Year']) === currentMonth)
+    .filter((row) => numberValue(row['Week Of Year']) <= targetWeek);
+  return rowsToDefinitions(PERIOD_TYPES.monthToDate, currentRows, priorRows);
 }
 
 function rowsToDefinitions(periodType, currentRows, priorRows) {
@@ -86,7 +118,7 @@ function rowsToDefinitions(periodType, currentRows, priorRows) {
     comparableWeekSlot: index + 1,
     row,
     currentBounds,
-    priorBounds,
+    priorBounds
   }));
 
   const priorDefinitions = priorUnique.map((row, index) => buildDefinition({
@@ -96,7 +128,7 @@ function rowsToDefinitions(periodType, currentRows, priorRows) {
     comparableWeekSlot: index + 1,
     row,
     currentBounds,
-    priorBounds,
+    priorBounds
   }));
 
   return [...currentDefinitions, ...priorDefinitions];
@@ -104,15 +136,23 @@ function rowsToDefinitions(periodType, currentRows, priorRows) {
 
 function buildDefinition({ periodType, labels, comparisonSide, comparableWeekSlot, row, currentBounds, priorBounds }) {
   const weekEnding = normalizeDate(row['Week Ending']);
+  const comparisonMode = PERIOD_COMPARISON_MODES[periodType];
+  const weekOfYear = numberValue(row['Week Of Year']);
   return {
     id: `${periodType}_${comparisonSide}_${comparableWeekSlot}_${weekEnding}`,
+    comparison_window_id: comparisonWindowId(periodType, comparisonMode),
     period_type: periodType,
+    period_lens: periodType,
+    comparison_mode: comparisonMode,
+    history_offset: 1,
     period_label_current: labels.current,
     period_label_prior: labels.prior,
     comparison_side: comparisonSide,
     comparable_week_slot: comparableWeekSlot,
+    comparable_slot: comparableWeekSlot,
     week_ending: weekEnding,
-    week_of_year: numberValue(row['Week Of Year']),
+    week_of_year: weekOfYear,
+    fiscal_week: weekOfYear,
     month_of_year: numberValue(row['Month of Year']),
     financial_year: cleanString(row['Financial Year']),
     current_period_start_date: currentBounds.start,
@@ -145,27 +185,56 @@ function uniqueWeeks(rows) {
   return unique.sort((a, b) => normalizeDate(a['Week Ending']).localeCompare(normalizeDate(b['Week Ending'])));
 }
 
-function previousFiscalMonth(month, offset) {
-  const normalized = numberValue(month);
-  return ((normalized - offset - 1 + 12) % 12) + 1;
-}
-
-function selectRowsForMonths(rows, months) {
+function selectRowsForMonths(rows, months, { preferCurrentFy = false } = {}) {
   const selected = [];
   for (const month of months) {
     const monthRows = rows.filter((row) => numberValue(row['Month of Year']) === month);
-    const currentFyRows = monthRows.filter((row) => isYes(row['FC Current FY Flag']));
-    const fallbackRows = currentFyRows.length > 0
-      ? currentFyRows
-      : monthRows.filter((row) => isYes(row['FC Last FY Flag']));
-    selected.push(...fallbackRows);
+    const currentRows = monthRows.filter((row) => isYes(row['FC Current FY Flag']));
+    const lastRows = monthRows.filter((row) => isYes(row['FC Last FY Flag']));
+    selected.push(...(preferCurrentFy && currentRows.length ? currentRows : lastRows.length ? lastRows : currentRows));
   }
 
   return selected.sort((a, b) => normalizeDate(a['Week Ending']).localeCompare(normalizeDate(b['Week Ending'])));
 }
 
+function rowsBetweenWeeks(rows, startWeek, endWeek) {
+  return rows
+    .filter((row) => numberValue(row['Week Of Year']) >= startWeek && numberValue(row['Week Of Year']) <= endWeek)
+    .sort((a, b) => normalizeDate(a['Week Ending']).localeCompare(normalizeDate(b['Week Ending'])));
+}
+
+function currentFiscalRows(rows) {
+  return rows.filter((row) => isYes(row['FC Current FY Flag']));
+}
+
+function lastFiscalRows(rows) {
+  return rows.filter((row) => isYes(row['FC Last FY Flag']));
+}
+
+function targetCompletedWeek(rows) {
+  return maxNumber(currentFiscalRows(rows).map((row) => row['Week Of Year'])) - 1;
+}
+
+function quarterStartForWeek(week) {
+  const normalized = numberValue(week);
+  return Math.floor((normalized - 1) / FISCAL_WEEKS_PER_QUARTER) * FISCAL_WEEKS_PER_QUARTER + 1;
+}
+
+function previousFiscalMonth(month, offset) {
+  const normalized = numberValue(month);
+  return ((normalized - offset - 1 + 12) % 12) + 1;
+}
+
+function comparisonWindowId(periodType, comparisonMode) {
+  return [periodType, comparisonMode]
+    .map((value) => cleanString(value).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''))
+    .filter(Boolean)
+    .join('__');
+}
+
 function maxNumber(values) {
-  return Math.max(...values.map(numberValue).filter((value) => Number.isFinite(value)));
+  const numbers = values.map(numberValue).filter((value) => Number.isFinite(value));
+  return numbers.length ? Math.max(...numbers) : 0;
 }
 
 function numberValue(value) {

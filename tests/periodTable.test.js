@@ -5,11 +5,11 @@ import { getPeriodPage, PERIOD_PAGE_SIZE, sortPeriodRowsForDisplay } from '../sr
 
 test('sortPeriodRowsForDisplay orders rows by period, financial year, week, and side', () => {
   const rows = [
-    { id: 'ytd-prior', period_type: 'Year to Date', financial_year: '24-25', week_of_year: 49, comparison_side: 'prior', week_ending: '2025-06-08' },
-    { id: 'last-week-current-week-49', period_type: 'Last Week', financial_year: '25-26', week_of_year: 49, comparison_side: 'current', week_ending: '2026-06-07' },
-    { id: 'last-week-current-week-48', period_type: 'Last Week', financial_year: '25-26', week_of_year: 48, comparison_side: 'current', week_ending: '2026-05-31' },
-    { id: 'last-week-prior', period_type: 'Last Week', financial_year: '25-26', week_of_year: 49, comparison_side: 'prior', week_ending: '2026-06-07' },
-    { id: 'last-month-current', period_type: 'Last Month', financial_year: '25-26', week_of_year: 45, comparison_side: 'current', week_ending: '2026-05-10' }
+    { id: 'ytd-prior', period_type: 'Year To Date', financial_year: '24-25', week_of_year: 49, comparison_side: 'prior', week_ending: '2025-06-08' },
+    { id: 'last-week-current-week-49', period_type: 'Last Completed Week', financial_year: '25-26', week_of_year: 49, comparison_side: 'current', week_ending: '2026-06-07' },
+    { id: 'last-week-current-week-48', period_type: 'Last Completed Week', financial_year: '25-26', week_of_year: 48, comparison_side: 'current', week_ending: '2026-05-31' },
+    { id: 'last-week-prior', period_type: 'Last Completed Week', financial_year: '25-26', week_of_year: 49, comparison_side: 'prior', week_ending: '2026-06-07' },
+    { id: 'last-month-current', period_type: 'Last Completed Month', financial_year: '25-26', week_of_year: 45, comparison_side: 'current', week_ending: '2026-05-10' }
   ];
 
   const sorted = sortPeriodRowsForDisplay(rows);
@@ -26,7 +26,7 @@ test('sortPeriodRowsForDisplay orders rows by period, financial year, week, and 
 test('getPeriodPage returns 30 rows per page with display metadata', () => {
   const rows = Array.from({ length: 138 }, (_, index) => ({
     id: `row-${index + 1}`,
-    period_type: 'Year to Date',
+    period_type: 'Year To Date',
     financial_year: '25-26',
     week_of_year: index + 1,
     comparison_side: 'current',
