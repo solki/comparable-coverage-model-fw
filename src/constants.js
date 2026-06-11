@@ -85,6 +85,49 @@ export const PERIOD_LABELS = {
   }
 };
 
+export const CCM_LAYERS = [
+  {
+    id: 'calendar',
+    name: 'Calendar Layer / Time Truth',
+    description: 'Defines fiscal periods, comparison windows, comparison sides, and comparable slots.',
+    flagField: null,
+    reasonField: null,
+    produces: ['period_type', 'comparison_side', 'comparable_week_slot', 'comparison_window_id']
+  },
+  {
+    id: 'trading',
+    name: 'Trading Expectation / Operational Truth',
+    description: 'Determines whether a store was expected to trade in a given store-week.',
+    flagField: 'system_include_flag',
+    reasonField: 'system_reason_code',
+    produces: ['system_include_flag', 'system_reason_code']
+  },
+  {
+    id: 'metricCoverage',
+    name: 'Metric Coverage / Data Truth',
+    description: 'Indicates whether metric data exists for a store-metric-week. This is a transparency layer — missing data is a warning, not a blocking exclusion.',
+    flagField: 'source_data_exists',
+    reasonField: null,
+    produces: ['source_data_exists', 'source_row_count', 'source_value']
+  },
+  {
+    id: 'comparableCoverage',
+    name: 'Comparable Coverage Model / Comparability Truth',
+    description: 'Combines trading expectation, manual overrides, slot completeness, and paired propagation into the final LFL inclusion decision.',
+    flagField: 'mask_include_flag',
+    reasonField: 'final_reason_code',
+    produces: ['manual_include_flag', 'is_manual_override', 'paired_slot_include_flag', 'final_include_flag', 'mask_include_flag', 'final_reason_code']
+  },
+  {
+    id: 'presentation',
+    name: 'Dashboards & Consumption / Presentation',
+    description: 'Defines how the CCM mask is consumed. LFL ON filters to mask_include_flag = Y. LFL OFF is inclusive (no mask filter).',
+    flagField: null,
+    reasonField: null,
+    produces: ['L4L ON filter: mask_include_flag = Y', 'L4L OFF: inclusive view']
+  }
+];
+
 export const SOURCE_REQUIRED_FIELDS = [
   'Date',
   'Week Ending',

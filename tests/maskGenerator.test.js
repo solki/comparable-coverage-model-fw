@@ -188,7 +188,7 @@ test('missing source data does not automatically set include N', () => {
   assert.equal(prior.mask_include_flag, 'Y');
 });
 
-test('week 53 is shown but system-excluded without a manual override', () => {
+test('week 53 is shown but excluded by slot completeness rule without a manual override', () => {
   const rows = generate({
     periodRows: [
       periodRow({ periodType: PERIOD_TYPES.yearToDate, side: 'current', slot: 53, week: 53, weekEnding: '2026-06-28' }),
@@ -196,14 +196,23 @@ test('week 53 is shown but system-excluded without a manual override', () => {
     ]
   });
 
+  // Week 53 rows are present (visible in LFL OFF)
   assert.equal(rows.length, 2);
   assert.ok(rows.every((row) => row.week_of_year === 53));
-  assert.ok(rows.every((row) => row.system_include_flag === 'N'));
+
+  // Week 53 is no longer a system-level exclusion — store eligibility applies normally
+  assert.ok(rows.every((row) => row.system_include_flag === 'Y'));
+  assert.ok(rows.every((row) => row.system_reason_code === 'INCLUDED'));
+
+  // Manual and effective flags are Y (no manual override)
   assert.ok(rows.every((row) => row.manual_include_flag === 'Y'));
-  assert.ok(rows.every((row) => row.effective_include_flag === 'N'));
+  assert.ok(rows.every((row) => row.effective_include_flag === 'Y'));
+
+  // Week 53 excluded by slot completeness rule (subtype: WEEK_53_EXCLUDED)
   assert.ok(rows.every((row) => row.final_include_flag === 'N'));
-  assert.ok(rows.every((row) => row.system_reason_code === 'WEEK_53_EXCLUDED'));
+  assert.ok(rows.every((row) => row.mask_include_flag === 'N'));
   assert.ok(rows.every((row) => row.final_reason_code === 'WEEK_53_EXCLUDED'));
+  assert.ok(rows.every((row) => row.paired_slot_include_flag === 'N'));
 });
 
 test('unpaired comparable slots remain visible but are excluded from LFL ON', () => {
@@ -225,6 +234,101 @@ test('unpaired comparable slots remain visible but are excluded from LFL ON', ()
   assert.equal(unpairedRow.final_include_flag, 'N');
   assert.equal(unpairedRow.mask_include_flag, 'N');
   assert.equal(unpairedRow.final_reason_code, REASON_CODES.unpairedPeriodWeek);
+});
+
+test('week 53 on only one comparison side is excluded as WEEK_53_EXCLUDED', () => {
+  const rows = generate({
+    periodRows: [
+      periodRow({ periodType: PERIOD_TYPES.yearToDate, side: 'current', slot: 53, week: 53, weekEnding: '2026-06-28' })
+    ]
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].week_of_year, 53);
+  // Slot is unpaired (only current side) AND is Week 53 → WEEK_53_EXCLUDED wins as subtype
+  assert.equal(rows[0].system_include_flag, 'Y');
+  assert.equal(rows[0].final_include_flag, 'N');
+  assert.equal(rows[0].mask_include_flag, 'N');
+  assert.equal(rows[0].final_reason_code, 'WEEK_53_EXCLUDED');
+});
+
+test('unmatched comparable slot from unequal month weeks gets UNPAIRED_PERIOD_WEEK', () => {
+  // Simulate a month where current has 5 weeks but prior only has 4
+  const rows = generate({
+    periodRows: [
+      periodRow({ periodType: PERIOD_TYPES.lastCompletedMonth, side: 'current', slot: 1, week: 9, weekEnding: '2025-08-31' }),
+      periodRow({ periodType: PERIOD_TYPES.lastCompletedMonth, side: 'prior', slot: 1, week: 9, weekEnding: '2024-09-01' }),
+      periodRow({ periodType: PERIOD_TYPES.lastCompletedMonth, side: 'current', slot: 2, week: 10, weekEnding: '2025-09-07' }),
+      periodRow({ periodType: PERIOD_TYPES.lastCompletedMonth, side: 'prior', slot: 2, week: 10, weekEnding: '2024-09-08' }),
+      periodRow({ periodType: PERIOD_TYPES.lastCompletedMonth, side: 'current', slot: 3, week: 11, weekEnding: '2025-09-14' }),
+      periodRow({ periodType: PERIOD_TYPES.lastCompletedMonth, side: 'prior', slot: 3, week: 11, weekEnding: '2024-09-15' }),
+      periodRow({ periodType: PERIOD_TYPES.lastCompletedMonth, side: 'current', slot: 4, week: 12, weekEnding: '2025-09-21' }),
+      periodRow({ periodType: PERIOD_TYPES.lastCompletedMonth, side: 'prior', slot: 4, week: 12, weekEnding: '2024-09-22' }),
+      // Current has week 13 (5th week), prior does not
+      periodRow({ periodType: PERIOD_TYPES.lastCompletedMonth, side: 'current', slot: 5, week: 13, weekEnding: '2025-09-28' })
+    ]
+  });
+
+  const unpairedRow = rows.find((row) => row.comparable_week_slot === 5);
+  const pairedRows = rows.filter((row) => row.comparable_week_slot <= 4);
+
+  // Unpaired slot: visible in LFL OFF, excluded from LFL ON
+  assert.equal(unpairedRow.system_include_flag, 'Y');
+  assert.equal(unpairedRow.final_include_flag, 'N');
+  assert.equal(unpairedRow.mask_include_flag, 'N');
+  assert.equal(unpairedRow.final_reason_code, REASON_CODES.unpairedPeriodWeek);
+
+  // Paired slots remain included
+  assert.ok(pairedRows.every((row) => row.mask_include_flag === 'Y'));
+});
+
+test('slot completeness rule is applied after store+metric+week and paired propagation', () => {
+  // A manually excluded store+metric+week triggers propagation first,
+  // then slot completeness rules apply to the propagated exclusion
+  const rows = generate({
+    periodRows: [
+      periodRow({ periodType: PERIOD_TYPES.lastCompletedMonth, side: 'current', slot: 1, week: 9, weekEnding: '2025-08-31' }),
+      periodRow({ periodType: PERIOD_TYPES.lastCompletedMonth, side: 'prior', slot: 1, week: 9, weekEnding: '2024-09-01' }),
+      periodRow({ periodType: PERIOD_TYPES.lastCompletedMonth, side: 'current', slot: 2, week: 10, weekEnding: '2025-09-07' })
+    ],
+    manualOverrides: [{
+      store_code: eligibleStore.store_code,
+      metric,
+      week_ending: '2025-08-31',
+      manual_include_flag: 'N',
+      manual_reason: 'Store closed',
+      active_flag: 'Y'
+    }]
+  });
+
+  // Slot 1: manually excluded on current side → paired propagation excludes prior side
+  const slot1Current = rows.find((row) => row.comparable_week_slot === 1 && row.comparison_side === 'current');
+  const slot1Prior = rows.find((row) => row.comparable_week_slot === 1 && row.comparison_side === 'prior');
+  assert.equal(slot1Current.manual_include_flag, 'N');
+  assert.equal(slot1Current.final_reason_code, 'MANUAL_EXCLUDED');
+  assert.equal(slot1Prior.final_reason_code, 'PAIRED_SLOT_EXCLUSION');
+
+  // Slot 2: unpaired (only current side exists) → UNPAIRED_PERIOD_WEEK
+  const slot2 = rows.find((row) => row.comparable_week_slot === 2);
+  assert.equal(slot2.final_include_flag, 'N');
+  assert.equal(slot2.final_reason_code, REASON_CODES.unpairedPeriodWeek);
+});
+
+test('five-layer CCM_LAYERS constant is defined with all five layers', async () => {
+  const { CCM_LAYERS } = await import('../src/constants.js');
+
+  assert.ok(Array.isArray(CCM_LAYERS));
+  assert.equal(CCM_LAYERS.length, 5);
+
+  const layerIds = CCM_LAYERS.map((layer) => layer.id);
+  assert.deepEqual(layerIds, ['calendar', 'trading', 'metricCoverage', 'comparableCoverage', 'presentation']);
+
+  // Each layer has a name, description, produces array
+  for (const layer of CCM_LAYERS) {
+    assert.ok(typeof layer.name === 'string' && layer.name.length > 0);
+    assert.ok(typeof layer.description === 'string' && layer.description.length > 0);
+    assert.ok(Array.isArray(layer.produces));
+  }
 });
 
 test('generation supports multiple stores and multiple metrics with correct row counts', () => {

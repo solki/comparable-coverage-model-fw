@@ -83,10 +83,9 @@ function buildMaskRow({
   const manualFlag = normalizedOverride?.manual_include_flag === FLAGS.no ? FLAGS.no : FLAGS.yes;
   if (normalizedOverride) validateManualOverride({ ...normalizedOverride, manual_include_flag: manualFlag });
 
-  const week53Excluded = Number(periodWeek.week_of_year) === 53;
-  const systemFlag = eligibility.eligible && !week53Excluded ? FLAGS.yes : FLAGS.no;
+  const systemFlag = eligibility.eligible ? FLAGS.yes : FLAGS.no;
   const effectiveFlag = systemFlag === FLAGS.yes && manualFlag === FLAGS.yes ? FLAGS.yes : FLAGS.no;
-  const systemReason = week53Excluded ? REASON_CODES.week53Excluded : eligibility.reason_code;
+  const systemReason = eligibility.reason_code;
   const baseReason = effectiveFlag === FLAGS.yes
     ? REASON_CODES.included
     : systemFlag === FLAGS.no
@@ -191,6 +190,10 @@ function applyPairedSlotPropagation(rows) {
 }
 
 function applyUnpairedSlotExclusions(rows) {
+  // Slot Completeness Rule: any comparable slot that does not exist on ALL
+  // required comparison sides (current AND prior) must be excluded from LFL ON.
+  // Rows remain visible in LFL OFF regardless. Week 53 is a subtype — excluded
+  // even when both sides exist, with WEEK_53_EXCLUDED as the reason code.
   const sideCountsBySlot = new Map();
   for (const row of rows) {
     const key = comparableSlotKey(row);
@@ -203,16 +206,26 @@ function applyUnpairedSlotExclusions(rows) {
     const sides = sideCountsBySlot.get(comparableSlotKey(row));
     const hasCurrent = sides?.has('current');
     const hasPrior = sides?.has('prior');
-    if (hasCurrent && hasPrior) return row;
+    const slotIsComplete = hasCurrent && hasPrior;
+    const isWeek53 = Number(row.week_of_year) === 53;
+    const isAlreadyExcluded = row.final_include_flag === FLAGS.no;
+
+    // Complete slot that is not Week 53: no exclusion needed.
+    if (slotIsComplete && !isWeek53) return row;
+
+    // Determine the reason code for this exclusion.
+    const reasonCode = isWeek53
+      ? REASON_CODES.week53Excluded
+      : isAlreadyExcluded
+        ? row.final_reason_code
+        : REASON_CODES.unpairedPeriodWeek;
 
     return {
       ...row,
       paired_slot_include_flag: FLAGS.no,
       final_include_flag: FLAGS.no,
       mask_include_flag: FLAGS.no,
-      final_reason_code: row.final_include_flag === FLAGS.yes
-        ? REASON_CODES.unpairedPeriodWeek
-        : row.final_reason_code
+      final_reason_code: reasonCode
     };
   });
 }

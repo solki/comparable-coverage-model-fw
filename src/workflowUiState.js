@@ -16,9 +16,11 @@ export const TOOLTIP_COPY = {
   variancePercent: 'Calculated as Current minus Prior, divided by the absolute Prior value. If Prior is zero, percentage variance is not shown.',
   priorZero: 'Prior is zero and Current is non-zero, so percentage variance is not meaningful.',
   bothZero: 'Current and Prior are both zero, so percentage variance is not meaningful.',
-  week53Excluded: 'Week 53 is operationally valid when present, but excluded from comparable-week equivalence logic. Users do not need to manually exclude it.',
+  week53Excluded: 'Week 53 is excluded from comparable-slot equivalence logic. It is a subtype of the general Slot Completeness Rule: any comparable slot not present on all required comparison sides is excluded from LFL ON.',
+  slotCompleteness: 'Slot Completeness Rule: LFL ON includes only comparable slots that exist on all required comparison sides (current and prior). Unmatched slots remain visible in LFL OFF but are excluded from LFL ON with UNPAIRED_PERIOD_WEEK. Applies to Week 53, unequal month/quarter week counts, and any future period with mismatched sides.',
   diagnostics: 'Technical details for troubleshooting dataset aliases, AppDB, Workflow execution, and API errors.',
-  workflowAlias: 'The app starts the Workflow through the manifest alias, not the Workflow UUID. The Domo card must be mapped to the Workflow.'
+  workflowAlias: 'The app starts the Workflow through the manifest alias, not the Workflow UUID. The Domo card must be mapped to the Workflow.',
+  fiveLayerArchitecture: 'The CCM system follows a five-layer architecture: (1) Calendar — defines fiscal periods and comparable slots, (2) Trading Expectation — store expected-to-trade status, (3) Metric Coverage — data existence and quality, (4) Comparable Coverage — final LFL inclusion after rules and overrides, (5) Presentation — dashboard consumption with LFL ON/OFF.'
 };
 
 export function getWorkflowSteps({
