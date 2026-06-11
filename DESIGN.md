@@ -7,7 +7,7 @@ The custom app is an admin/generator tool for Phase 1 Comparable Coverage Model 
 The app:
 
 1. Reads `sourceMetrics`.
-2. Lets the admin select Store + Metric + Period Lens.
+2. Lets the admin select Store scope, one or more Metrics, and Period Lens.
 3. Derives comparable fiscal weeks dynamically from source calendar fields.
 4. Displays comparable weeks for review.
 5. Lets the admin save manual Store + Metric + Fiscal Week coverage adjustments.
@@ -34,14 +34,15 @@ This panel is intentionally not affected by Store, Metric, or Period Lens select
 
 Controls:
 
-- Store selector
-- Metric selector
+- Store selector with `All Stores`
+- Metric multi-select
 - Period Lens selector
+- Comparison mode is fixed by Period Lens and is not separately selectable.
 - Refresh button
 
 ## Screen: Selected Scope Summary
 
-Shows only values scoped to the selected Store + Metric + Period Lens:
+Shows only values scoped to the selected Store scope + selected Metric list + Period Lens:
 
 - Selected Source Records
 - Weekly Coverage Records
@@ -96,7 +97,7 @@ Active control:
 
 - `Rebuild Selected Scope Mask`
 
-Helper text makes clear that this rebuilds the selected-scope CCM output for the current Store, Metric, and Period Lens only. It is intended for Phase 1 validation, not production full-mask processing. Manual coverage adjustments are not affected.
+Helper text makes clear that this rebuilds the selected-scope CCM output for the current Store scope, Metric selection, and Period Lens only. It is intended for Phase 1 validation, not production full-mask processing. Manual coverage adjustments are not affected.
 
 Before execution, the app asks the user to confirm that existing selected-scope mask records will be cleared and replaced with the selected scope only.
 
@@ -129,7 +130,7 @@ No secrets or tokens are logged.
 
 ## Validation Summary
 
-Validation Summary is selected-scope only. It summarizes comparable week records for the selected Store + Metric + Period Lens and does not reuse global missing commencement or global date parsing warning counts.
+Validation Summary is selected-scope only. It summarizes comparable week records for the selected Store scope + Metric selection + Period Lens and does not reuse global missing commencement or global date parsing warning counts.
 
 Business Validation shows:
 

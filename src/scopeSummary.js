@@ -35,30 +35,38 @@ export function computeSelectedScopeSummary({
   sourceRows = [],
   sourceFacts = null,
   selectedStore = null,
+  selectedStores = null,
   selectedMetric = '',
+  selectedMetrics = null,
   selectedPeriodType = '',
   periodRows = [],
   manualOverrides = [],
   maskRows = []
 } = {}) {
-  const storeCode = selectedStore?.store_code || '';
+  const selectedStoreList = Array.isArray(selectedStores) && selectedStores.length
+    ? selectedStores
+    : [selectedStore].filter(Boolean);
+  const selectedMetricList = Array.isArray(selectedMetrics) && selectedMetrics.length
+    ? selectedMetrics
+    : [selectedMetric].filter(Boolean);
+  const storeCodes = selectedStoreList.map((store) => store.store_code).filter(Boolean);
   const scopedPeriodRows = periodRows.filter((row) => !selectedPeriodType || row.period_type === selectedPeriodType);
   const scopedFacts = matchingSourceFacts({
     sourceRows,
     sourceFacts,
-    storeCode,
-    metric: selectedMetric,
+    storeCodes,
+    metrics: selectedMetricList,
     weekEndings: unique(scopedPeriodRows.map((row) => row.week_ending))
   });
-  const scopedMaskRows = matchingMaskRows(maskRows, storeCode, selectedMetric, selectedPeriodType);
+  const scopedMaskRows = matchingMaskRows(maskRows, storeCodes, selectedMetricList, selectedPeriodType);
   const periodWeeks = unique(scopedPeriodRows.map((row) => normalizeDate(row.week_ending)).filter(Boolean));
   const factWeeks = new Set(scopedFacts.map((fact) => normalizeDate(fact.week_ending)).filter(Boolean));
 
   return {
     selected_period_type: selectedPeriodType || '',
     scoped_source_row_count: sumSourceRowCounts(scopedFacts),
-    scoped_store_count: storeCode ? 1 : 0,
-    scoped_metric_count: selectedMetric ? 1 : 0,
+    scoped_store_count: storeCodes.length,
+    scoped_metric_count: selectedMetricList.length,
     current_side_week_count: countPeriodSide(scopedPeriodRows, 'current'),
     prior_side_week_count: countPeriodSide(scopedPeriodRows, 'prior'),
     scoped_min_week_ending: minDate(scopedPeriodRows.map((row) => row.week_ending)),
@@ -71,8 +79,8 @@ export function computeSelectedScopeSummary({
     missing_source_week_count: periodWeeks.filter((weekEnding) => !factWeeks.has(weekEnding)).length,
     active_manual_override_count: countActiveOverrides({
       manualOverrides,
-      storeCode,
-      metric: selectedMetric,
+      storeCodes,
+      metrics: selectedMetricList,
       weekEndings: periodWeeks
     }),
     system_excluded_week_count: scopedMaskRows.filter((row) => row.system_include_flag === FLAGS.no).length,
@@ -99,14 +107,18 @@ export function getSourceFactForScope({ sourceRows = [], sourceFacts = null, sto
   };
 }
 
-function matchingSourceFacts({ sourceRows, sourceFacts, storeCode, metric, weekEndings }) {
+function matchingSourceFacts({ sourceRows, sourceFacts, storeCode, metric, storeCodes: scopedStoreCodes, metrics: scopedMetrics, weekEndings }) {
+  const storeCodes = scopedStoreCodes || [storeCode].filter(Boolean);
+  const metrics = scopedMetrics || [metric].filter(Boolean);
+  const storeSet = new Set(storeCodes);
+  const metricSet = new Set(metrics);
   const normalizedWeekEndings = new Set(weekEndings.map(normalizeDate).filter(Boolean));
-  if (!storeCode || !metric || normalizedWeekEndings.size === 0) return [];
+  if (!storeSet.size || !metricSet.size || normalizedWeekEndings.size === 0) return [];
 
   return normalizeSourceFacts(sourceFacts || sourceRows)
     .filter((fact) => (
-      fact.store_code === storeCode
-      && fact.metric === metric
+      storeSet.has(fact.store_code)
+      && metricSet.has(fact.metric)
       && normalizedWeekEndings.has(normalizeDate(fact.week_ending))
     ));
 }
@@ -124,10 +136,12 @@ function normalizeSourceFacts(rows) {
     .filter((row) => row.store_code && row.metric && row.week_ending);
 }
 
-function matchingMaskRows(maskRows, storeCode, metric, periodType) {
+function matchingMaskRows(maskRows, storeCodes, metrics, periodType) {
+  const storeSet = new Set(storeCodes.filter(Boolean));
+  const metricSet = new Set(metrics.filter(Boolean));
   return (Array.isArray(maskRows) ? maskRows : []).filter((row) => (
-    (!storeCode || row.store_code === storeCode)
-    && (!metric || row.metric === metric)
+    (!storeSet.size || storeSet.has(row.store_code))
+    && (!metricSet.size || metricSet.has(row.metric))
     && (!periodType || row.period_type === periodType)
   ));
 }
@@ -147,11 +161,13 @@ function countPeriodSide(rows, side) {
   return rows.filter((row) => row.comparison_side === side).length;
 }
 
-function countActiveOverrides({ manualOverrides, storeCode, metric, weekEndings }) {
+function countActiveOverrides({ manualOverrides, storeCodes, metrics, weekEndings }) {
   const weekSet = new Set(weekEndings);
+  const storeSet = new Set(storeCodes.filter(Boolean));
+  const metricSet = new Set(metrics.filter(Boolean));
   return (Array.isArray(manualOverrides) ? manualOverrides : []).filter((override) => (
-    override.store_code === storeCode
-    && override.metric === metric
+    storeSet.has(override.store_code)
+    && metricSet.has(override.metric)
     && weekSet.has(normalizeDate(override.week_ending))
     && override.active_flag !== FLAGS.no
   )).length;

@@ -78,10 +78,18 @@ Fiscal weeks are not persisted as an AppDB collection. `src/periodDefinition.js`
 
 Supported Period Lenses:
 
-- `Last Week`
-- `Last Month`
-- `Last Quarter`
-- `Year to Date`
+- `Last Completed Week`
+- `Last Completed Month`
+- `Last Completed Quarter`
+- `Year To Date`
+- `Quarter To Date`
+- `Month To Date`
+
+The UI does not expose separate comparison or history controls. The comparison mode is derived from Period Lens:
+
+- Last Completed Week, Last Completed Month, and Last Completed Quarter compare against Previous Period.
+- Year To Date, Quarter To Date, and Month To Date compare against Same Period Last Year.
+- Last Completed Quarter and Quarter To Date use 13 fiscal weeks per quarter.
 
 The UI displays derived comparable weeks for review, but users only save manual Store + Metric + Fiscal Week coverage adjustments.
 
@@ -105,6 +113,8 @@ Override context fields such as `period_type`, `comparison_side`, `comparable_we
 `ccm_l4l_week_mask` is not used by version 1.0.2 and is not mapped in this manifest. Do not delete the Domo AppDB collection because versions 1.0.0 and 1.0.1 may still use it.
 
 Week 53 rows are shown in review when present, but are automatically excluded with reason `WEEK_53_EXCLUDED`; users do not need to manually exclude them.
+
+Comparable slots that exist on only one required comparison side remain visible in LFL OFF but are excluded from LFL ON with reason `UNPAIRED_PERIOD_WEEK`.
 
 `ccm_generation_runs` stores run metadata and status.
 

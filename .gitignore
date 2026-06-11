@@ -9,3 +9,7 @@ dist/
 
 # Local validation outputs may contain environment-specific source samples
 MISC/source-aggregate-validation-result.json
+
+# Playwright artifacts
+.playwright-cli/
+output/

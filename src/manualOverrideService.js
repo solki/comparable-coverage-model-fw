@@ -15,6 +15,29 @@ export async function loadManualOverrides({ storeCode, metric }) {
   });
 }
 
+export async function loadManualOverridesForScope({ storeCodes = [], metrics = [] } = {}) {
+  const storeSet = new Set((Array.isArray(storeCodes) ? storeCodes : []).filter(Boolean));
+  const metricSet = new Set((Array.isArray(metrics) ? metrics : []).filter(Boolean));
+  if (!storeSet.size || !metricSet.size) return [];
+
+  if (storeSet.size === 1 && metricSet.size === 1) {
+    return loadManualOverrides({
+      storeCode: Array.from(storeSet)[0],
+      metric: Array.from(metricSet)[0]
+    });
+  }
+
+  const clients = createAppDbClients();
+  const activeOverrides = await getDocuments(clients.metricWeekOverrides, {
+    'content.active_flag': { $eq: FLAGS.yes }
+  });
+
+  return activeOverrides.filter((override) => (
+    storeSet.has(override.store_code)
+    && metricSet.has(override.metric)
+  ));
+}
+
 export async function saveManualOverrides({ store, metric, overrides, updatedBy = '', updatedAt = new Date().toISOString() }) {
   const clients = createAppDbClients();
   const documents = buildManualOverrideDocuments({ store, metric, overrides, updatedBy, updatedAt });

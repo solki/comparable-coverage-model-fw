@@ -91,6 +91,21 @@ export function getWorkflowSteps({
   ];
 }
 
+export function getActiveWorkflowStepId(steps = [], preferredStepId = '') {
+  const preferredStep = steps.find((step) => step.id === preferredStepId);
+  if (preferredStep && preferredStep.status !== 'locked') return preferredStep.id;
+
+  const actionableStep = steps.find((step) => ['ready', 'error', 'completed_unacknowledged'].includes(step.status));
+  if (actionableStep) return actionableStep.id;
+
+  const allComplete = steps.length > 0 && steps.every((step) => step.status === 'complete');
+  if (allComplete && steps.some((step) => step.id === WORKFLOW_STEP_IDS.results)) {
+    return WORKFLOW_STEP_IDS.results;
+  }
+
+  return (steps.find((step) => step.status === 'locked') || steps[steps.length - 1])?.id || WORKFLOW_STEP_IDS.mask;
+}
+
 function maskDisabledReason({ hasSourceProfile, hasSelectedScope, hasReviewConfirmed }) {
   if (!hasSourceProfile || !hasSelectedScope) return 'Load source data and select Store, Metric, and Period Lens first.';
   if (!hasReviewConfirmed) return 'Save Overrides to confirm Comparable Week Review before building the selected-scope mask.';
@@ -101,6 +116,7 @@ export function buildExecutionModal({
   type = 'mask',
   status = 'running',
   currentStage = 0,
+  title = '',
   message = '',
   resultSummary = '',
   errorMessage = ''
@@ -112,7 +128,7 @@ export function buildExecutionModal({
 
   return {
     type,
-    title: executionTitle(type, status),
+    title: title || executionTitle(type, status),
     explanation: executionExplanation(type),
     progressLabel: type === 'workflow' ? 'Approximate progress based on available Domo Workflow status.' : 'Execution progress',
     stages,

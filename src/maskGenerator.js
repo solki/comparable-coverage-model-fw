@@ -48,7 +48,7 @@ export function generateMaskRows({
     }
   }
 
-  return applyPairedSlotPropagation(applyStoreMetricWeekPropagation(rows));
+  return applyUnpairedSlotExclusions(applyPairedSlotPropagation(applyStoreMetricWeekPropagation(rows)));
 }
 
 export function summarizeMaskRows(rows) {
@@ -190,6 +190,33 @@ function applyPairedSlotPropagation(rows) {
   });
 }
 
+function applyUnpairedSlotExclusions(rows) {
+  const sideCountsBySlot = new Map();
+  for (const row of rows) {
+    const key = comparableSlotKey(row);
+    const sides = sideCountsBySlot.get(key) || new Set();
+    sides.add(row.comparison_side);
+    sideCountsBySlot.set(key, sides);
+  }
+
+  return rows.map((row) => {
+    const sides = sideCountsBySlot.get(comparableSlotKey(row));
+    const hasCurrent = sides?.has('current');
+    const hasPrior = sides?.has('prior');
+    if (hasCurrent && hasPrior) return row;
+
+    return {
+      ...row,
+      paired_slot_include_flag: FLAGS.no,
+      final_include_flag: FLAGS.no,
+      mask_include_flag: FLAGS.no,
+      final_reason_code: row.final_include_flag === FLAGS.yes
+        ? REASON_CODES.unpairedPeriodWeek
+        : row.final_reason_code
+    };
+  });
+}
+
 function storeMetricWeekKey(row) {
   return [row.store_code, row.metric, row.week_ending].join('|');
 }
@@ -200,6 +227,16 @@ function pairedSlotKey(row) {
     row.comparable_week_slot,
     row.store_code,
     row.metric
+  ].join('|');
+}
+
+function comparableSlotKey(row) {
+  return [
+    row.store_code,
+    row.metric,
+    row.period_lens || row.period_type,
+    row.comparison_mode || '',
+    row.comparable_slot || row.comparable_week_slot
   ].join('|');
 }
 

@@ -57,10 +57,14 @@ Do not introduce a persisted AppDB collection for period rows. Period rows are r
 
 `src/periodDefinition.js` derives:
 
-- `Last Week`
-- `Last Month`
-- `Last Quarter`
-- `Year to Date`
+- `Last Completed Week`
+- `Last Completed Month`
+- `Last Completed Quarter`
+- `Year To Date`
+- `Quarter To Date`
+- `Month To Date`
+
+The UI exposes only Period Lens. It does not expose separate comparison/history controls. Last Completed periods use `Previous Period`; YTD/QTD/MTD use `Same Period Last Year`. Quarter logic uses 13 fiscal weeks.
 
 The UI may display derived period weeks for review, but users edit only Store + Metric + Week manual overrides.
 
@@ -100,13 +104,14 @@ Grain:
 
 Generation rules:
 
-1. Generate selected Store + Metric + Period Type only.
+1. Generate selected Store scope, selected Metric scope, and selected Period Type only. Store scope may be one store or `All Stores`; Metric scope may include one or more metrics.
 2. Evaluate store lifecycle using commencement/closure dates and current period bounds.
 3. Apply active manual overrides.
 4. Propagate excluded Store + Metric + Week anywhere it appears.
 5. Propagate current/prior pair exclusions within the same period type and slot.
 6. Do not treat missing source fact rows as automatic exclusions.
 7. Show Week 53 when it appears, but automatically exclude it with `WEEK_53_EXCLUDED`; do not require a manual override.
+7a. Exclude comparable slots that exist on only one required comparison side with `UNPAIRED_PERIOD_WEEK`; keep those rows visible in LFL OFF.
 8. Clear `ccm_selected_scope_mask` before inserting selected-scope output.
 9. Never clear `ccm_metric_week_overrides`.
 10. Never clear `ccm_generation_runs`.

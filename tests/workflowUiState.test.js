@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildExecutionModal,
+  getActiveWorkflowStepId,
   getCoverageModeLabel,
   getTooltipCopy,
   getWorkflowSteps
@@ -88,6 +89,36 @@ test('comparison and exclusion steps unlock only after result data is available 
   assert.equal(steps[1].status, 'complete');
   assert.equal(steps[2].status, 'complete');
   assert.equal(steps[3].status, 'complete');
+});
+
+test('active workflow step does not pin completed runs to exclusions', () => {
+  const steps = getWorkflowSteps({
+    hasSourceProfile: true,
+    hasSelectedScope: true,
+    hasReviewConfirmed: true,
+    hasMaskCompleted: true,
+    hasMaskAcknowledged: true,
+    hasWorkflowAcknowledged: true,
+    hasComparisonRows: true
+  });
+
+  assert.equal(getActiveWorkflowStepId(steps), 'results');
+  assert.equal(getActiveWorkflowStepId(steps, 'mask'), 'mask');
+  assert.equal(getActiveWorkflowStepId(steps, 'exclusions'), 'exclusions');
+});
+
+test('active workflow step ignores locked preferred steps and keeps the next valid action linear', () => {
+  const steps = getWorkflowSteps({
+    hasSourceProfile: true,
+    hasSelectedScope: true,
+    hasReviewConfirmed: true,
+    hasMaskCompleted: true,
+    hasMaskAcknowledged: true,
+    hasWorkflowAcknowledged: false,
+    hasComparisonRows: false
+  });
+
+  assert.equal(getActiveWorkflowStepId(steps, 'results'), 'workflow');
 });
 
 test('existing comparison rows do not mark workflow step complete after a new mask is acknowledged', () => {

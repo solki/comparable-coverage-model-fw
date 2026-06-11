@@ -2,7 +2,7 @@ import { COLLECTIONS, FLAGS, SOURCE_DATASET_ALIAS } from './constants.js';
 import { generateMaskRows } from './maskGenerator.js';
 import { createRunId, buildRunRecord, writeMaskRun } from './maskWriteService.js';
 import { derivePeriodDefinitions, validatePeriods } from './periodDefinitionService.js';
-import { loadManualOverrides, saveManualOverrides } from './manualOverrideService.js';
+import { loadManualOverridesForScope, saveManualOverrides } from './manualOverrideService.js';
 import { profileSource } from './sourceDataService.js';
 import { buildValidationSummary } from './validation.js';
 import { getRuntimeLabel } from './domoClient.js';
@@ -24,6 +24,7 @@ import {
 } from './workflowService.js';
 import {
   buildExecutionModal,
+  getActiveWorkflowStepId,
   getCoverageModeLabel,
   getTooltipCopy,
   getWorkflowSteps
@@ -36,6 +37,7 @@ import {
 import { displayText, helperText, labels } from './terminology.js';
 
 const CCM_UI_STATE_STORAGE_KEY = 'forty_winks_ccm_ui_state_v1';
+const ALL_STORES_VALUE = '__ALL_STORES__';
 
 export function createApp(root) {
   const persistedUiState = loadPersistedUiState();
@@ -51,6 +53,7 @@ export function createApp(root) {
     periodSource: 'none',
     selectedStoreCode: persistedUiState.selectedStoreCode || '',
     selectedMetric: persistedUiState.selectedMetric || '',
+    selectedMetrics: Array.isArray(persistedUiState.selectedMetrics) ? persistedUiState.selectedMetrics : [],
     selectedPeriodType: persistedUiState.selectedPeriodType || '',
     manualOverrides: [],
     diagnostics: {
@@ -82,6 +85,7 @@ export function createApp(root) {
     l4lComparableCoverageOn: persistedUiState.l4lComparableCoverageOn ?? true,
     l4lMessage: persistedUiState.l4lMessage || 'No L4L comparison data is available. Run the Prepare L4L Comparison Facts Workflow first.',
     workflowProgress: null,
+    activeStepId: persistedUiState.activeStepId || '',
     diagnosticsOpen: Boolean(persistedUiState.diagnosticsOpen),
     activeEvidenceTab: persistedUiState.activeEvidenceTab || 'excluded',
     excludedFilters: {
@@ -134,7 +138,8 @@ export function createApp(root) {
       state.sourceMode = sourceResult.source;
       state.sourceProfile = sourceResult.profile;
       state.selectedStoreCode = resolveStoreCode(sourceResult.profile, state.selectedStoreCode);
-      state.selectedMetric = resolveMetric(sourceResult.profile, state.selectedMetric);
+      state.selectedMetrics = resolveMetrics(sourceResult.profile, state.selectedMetrics, state.selectedMetric);
+      state.selectedMetric = state.selectedMetrics[0] || '';
       state.periodRows = periods.rows;
       state.selectedPeriodType = resolvePeriodType(periods.rows, state.selectedPeriodType);
       state.periodSource = periods.source;
@@ -145,6 +150,7 @@ export function createApp(root) {
       if (recoveredAfterDomoRefresh) {
         state.comparisonRefreshPending = false;
         state.stepAcknowledged.workflow = true;
+        state.activeStepId = 'results';
       }
       state.diagnostics = mergeDiagnostics(
         state.diagnostics,
@@ -201,6 +207,8 @@ export function createApp(root) {
           ${healthChip('Source', state.diagnostics?.source?.queryable)}
           ${healthChip('AppDB', state.diagnostics?.appDb?.reachable)}
           ${healthChip('Workflow', getWorkflowTriggerSupport().supported)}
+          <button type="button" class="secondary icon-button" data-action="change-scope">Change Store / Metric / Period</button>
+          <button type="button" class="secondary icon-button" data-action="start-new-run">Start New Run</button>
           <button type="button" class="secondary icon-button" data-action="toggle-diagnostics" aria-expanded="${state.diagnosticsOpen ? 'true' : 'false'}">
             Diagnostics
           </button>
@@ -219,7 +227,7 @@ export function createApp(root) {
         </div>
         <div>
           <span>Metric</span>
-          <strong>${escapeHtml(state.selectedMetric || '-')}</strong>
+          <strong>${escapeHtml(selectedMetricDisplay())}</strong>
         </div>
         <div>
           <span>${escapeHtml(labels.periodLens)}</span>
@@ -260,7 +268,8 @@ export function createApp(root) {
           ${action.disabledReason ? `<p class="disabled-reason">${escapeHtml(action.disabledReason)}</p>` : ''}
         </div>
         <div class="next-action-control">
-          ${action.action ? `<button type="button" class="${escapeAttribute(action.kind || 'primary')} compact" data-action="${escapeAttribute(action.action)}" ${action.disabled ? 'disabled' : ''}>${escapeHtml(action.buttonLabel)}</button>` : statusBadge(action.status || activeWorkflowStep().status)}
+          <span class="next-action-hint">Use the active work area below.</span>
+          ${statusBadge(action.status || activeWorkflowStep().status)}
         </div>
       </section>
     `;
@@ -273,6 +282,7 @@ export function createApp(root) {
           <button
             class="workflow-rail-step workflow-step workflow-step-${escapeAttribute(step.status)}"
             type="button"
+            data-action="open-workflow-step"
             data-step-id="${escapeAttribute(step.id)}"
             ${step.status === 'locked' ? 'disabled' : ''}
             title="${escapeAttribute(step.disabledReason || step.help)}"
@@ -307,6 +317,7 @@ export function createApp(root) {
           ${statusBadge(step.status)}
         </div>
         <div class="workspace-grid">
+          ${renderRunCompletionPanel()}
           ${renderActiveStepBody(step)}
         </div>
       </section>
@@ -324,6 +335,28 @@ export function createApp(root) {
       return state.l4lRows.length ? renderL4LComparisonVisualization() : renderPrepareL4LWorkflowPanel();
     }
     return `${renderSelectionControls()}${renderSelectedScopeSummary()}${renderGenerateMask()}${renderPeriodDefinitions()}${renderValidationSummary()}`;
+  }
+
+  function renderRunCompletionPanel() {
+    if (!state.l4lRows.length) return '';
+
+    return `
+      <section class="panel panel-wide run-complete-panel" aria-label="Run Complete">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Run Complete</p>
+            <h2>Ready for review or another run</h2>
+            <p class="note">The current L4L comparison facts are loaded. Review results and evidence, or start a new run to choose another Store, Metric, or Period Lens.</p>
+          </div>
+          ${statusBadge('complete')}
+        </div>
+        <div class="button-row">
+          <button type="button" class="primary compact" data-action="start-new-run">Start New Run</button>
+          <button type="button" class="secondary" data-action="change-scope">Change Store / Metric / Period</button>
+          <button type="button" class="secondary" data-action="open-workflow-step" data-step-id="exclusions">Review Excluded Weeks</button>
+        </div>
+      </section>
+    `;
   }
 
   function renderGuidedStep() {
@@ -348,7 +381,7 @@ export function createApp(root) {
   function workflowSteps() {
     return getWorkflowSteps({
       hasSourceProfile: Boolean(state.sourceProfile),
-      hasSelectedScope: Boolean(state.selectedStoreCode && state.selectedMetric && state.selectedPeriodType),
+      hasSelectedScope: Boolean(scopeSelectionReady()),
       hasReviewConfirmed: Boolean(state.reviewConfirmed),
       hasMaskCompleted: Boolean(state.stepCompletion.mask),
       hasMaskAcknowledged: Boolean(state.stepAcknowledged.mask),
@@ -362,9 +395,8 @@ export function createApp(root) {
 
   function activeWorkflowStep() {
     const steps = workflowSteps();
-    return steps.find((step) => ['ready', 'error', 'completed_unacknowledged'].includes(step.status))
-      || steps.find((step) => step.status === 'locked')
-      || steps[steps.length - 1];
+    const activeStepId = getActiveWorkflowStepId(steps, state.activeStepId);
+    return steps.find((step) => step.id === activeStepId) || steps[0];
   }
 
   function guidedStepDescription(stepId) {
@@ -418,14 +450,14 @@ export function createApp(root) {
           reason: 'Review the comparable weeks and click Save Overrides to confirm Comparable Week Review before building the selected-scope mask.',
           action: 'save-overrides',
           buttonLabel: 'Save Overrides',
-          disabled: state.loading || !state.selectedStoreCode || !state.selectedMetric,
+          disabled: state.loading || !scopeSelectionReady(),
           disabledReason: 'Save Overrides to confirm Comparable Week Review before Build Coverage Mask becomes available.',
           kind: 'secondary'
         };
       }
 
       return {
-        title: `Build the selected-scope mask for ${state.selectedStoreCode || '-'} / ${state.selectedMetric || '-'} / ${state.selectedPeriodType || '-'}.`,
+        title: `Build the selected-scope mask for ${selectedStoreDisplay()} / ${selectedMetricDisplay()} / ${state.selectedPeriodType || '-'}.`,
         reason: 'The Workflow uses this selected-scope mask output to prepare comparison facts.',
         action: 'generate-mask',
         buttonLabel: 'Rebuild Selected Scope Mask',
@@ -507,13 +539,14 @@ export function createApp(root) {
             <label>
               <span>Store</span>
               <select data-action="select-store" ${state.loading ? 'disabled' : ''}>
+                <option value="${ALL_STORES_VALUE}" ${state.selectedStoreCode === ALL_STORES_VALUE ? 'selected' : ''}>All Stores</option>
                 ${(profile.stores || []).map((store) => `<option value="${escapeAttribute(store.store_code)}" ${store.store_code === state.selectedStoreCode ? 'selected' : ''}>${escapeHtml(store.store_code)} - ${escapeHtml(store.store_name || 'Unknown')}</option>`).join('')}
               </select>
             </label>
             <label>
               <span>Metric</span>
-              <select data-action="select-metric" ${state.loading ? 'disabled' : ''}>
-                ${(profile.metrics || []).map((item) => `<option value="${escapeAttribute(item.metric)}" ${item.metric === state.selectedMetric ? 'selected' : ''}>${escapeHtml(item.metric)}</option>`).join('')}
+              <select data-action="select-metrics" multiple size="4" ${state.loading ? 'disabled' : ''}>
+                ${(profile.metrics || []).map((item) => `<option value="${escapeAttribute(item.metric)}" ${selectedMetricList().includes(item.metric) ? 'selected' : ''}>${escapeHtml(item.metric)}</option>`).join('')}
               </select>
             </label>
             <label>
@@ -523,7 +556,8 @@ export function createApp(root) {
               </select>
             </label>
           </div>
-          <p class="note">Current selection: ${escapeHtml(state.selectedStoreCode || '-')} / ${escapeHtml(state.selectedMetric || '-')} / ${escapeHtml(state.selectedPeriodType || '-')}.</p>
+          <p class="note">Current selection: ${escapeHtml(selectedStoreDisplay())} / ${escapeHtml(selectedMetricDisplay())} / ${escapeHtml(state.selectedPeriodType || '-')}.</p>
+          <p class="note">Fixed comparison: Last Completed periods compare against Previous Period. YTD, QTD, and MTD compare against Same Period Last Year. Comparison settings are derived from Period Lens.</p>
         ` : emptyState('Load source data before selecting a scope.')}
       </section>
     `;
@@ -542,7 +576,7 @@ export function createApp(root) {
             ${metric(labels.selectedSourceRecords, summary.scoped_source_row_count)}
             ${metric(labels.weeklyCoverageRecords, summary.weekly_coverage_record_count)}
             ${metric(labels.selectedStore, selectedStoreDisplay())}
-            ${metric(labels.selectedMetric, state.selectedMetric || '-')}
+            ${metric(labels.selectedMetric, selectedMetricDisplay())}
             ${metric(labels.selectedPeriodLens, summary.selected_period_type || '-')}
             ${metric(labels.currentComparableWeeks, summary.current_side_week_count)}
             ${metric(labels.priorComparableWeeks, summary.prior_side_week_count)}
@@ -573,9 +607,10 @@ export function createApp(root) {
             <h2>Comparable Week Review / Override Editor</h2>
             ${statusBadge(state.reviewConfirmed ? 'complete' : 'locked')}
           </div>
-          <button type="button" class="secondary" data-action="save-overrides" ${state.loading || !state.selectedStoreCode || !state.selectedMetric ? 'disabled' : ''}>Save Overrides</button>
+          <button type="button" class="secondary" data-action="save-overrides" ${state.loading || !scopeSelectionReady() ? 'disabled' : ''}>Save Overrides</button>
         </div>
         <p class="note">Source: ${escapeHtml(state.periodSource)}. Validation: ${validation.valid ? 'valid' : `${validation.errors.length} error(s)`}. Fiscal weeks are derived from sourceMetrics at runtime and are not persisted in AppDB. ${escapeHtml(helperText.tradingExpectation)}</p>
+        ${singleOverrideScope() ? '' : '<p class="note">Manual override editing is available for one Store and one Metric at a time. This broader scope will use existing active overrides and Save Overrides will confirm the review without writing new override documents.</p>'}
         ${state.reviewConfirmed ? '<p class="success-message">Comparable Week Review confirmed. Build Coverage Mask is now available.</p>' : '<p class="disabled-reason">Save Overrides to confirm Comparable Week Review before building the selected-scope mask.</p>'}
         ${visibleRows.length ? renderPeriodTable(visibleRows) : emptyState('No comparable weeks are available for the selected Period Lens.')}
       </section>
@@ -595,7 +630,7 @@ export function createApp(root) {
         <p class="note">${escapeHtml(displayText.selectedScopeCollection)}</p>
         <p class="note">${escapeHtml(helperText.selectedScopeMask)}</p>
         ${step?.disabledReason ? `<p class="disabled-reason">${escapeHtml(step.disabledReason)}</p>` : ''}
-        <button type="button" class="primary" data-action="generate-mask" ${isLocked || !state.reviewConfirmed || !state.sourceProfile || !selectedPeriodRows().length || !state.selectedStoreCode || !state.selectedMetric ? 'disabled' : ''}>
+        <button type="button" class="primary" data-action="generate-mask" ${isLocked || !state.reviewConfirmed || !state.sourceProfile || !selectedPeriodRows().length || !scopeSelectionReady() ? 'disabled' : ''}>
           Rebuild Selected Scope Mask
         </button>
       </section>
@@ -766,7 +801,7 @@ export function createApp(root) {
           <p class="note">No cancel button is shown while Domo is running the operation.</p>
           <div class="button-row confirmation-actions">
             ${modal.showCloseButton ? '<button type="button" class="secondary" data-action="close-execution-modal">Close</button>' : ''}
-            ${modal.showCompleteButton ? `<button type="button" class="primary compact" data-action="complete-execution-modal">${escapeHtml(executionCompleteButtonLabel(modalState.type))}</button>` : ''}
+            ${modal.showCompleteButton ? `<button type="button" class="primary compact" data-action="complete-execution-modal">${escapeHtml(modalState.completeLabel || executionCompleteButtonLabel(modalState.type))}</button>` : ''}
           </div>
         </div>
       </section>
@@ -1210,7 +1245,52 @@ export function createApp(root) {
   }
 
   function renderPeriodTable(rows) {
-    const page = getPeriodPage(reviewRowsForRows(rows), state.periodPage);
+    const reviewRows = reviewRowsForRows(rows);
+    if (!reviewRows.length && !singleOverrideScope()) {
+      const page = getPeriodPage(rows, state.periodPage);
+      return `
+        <div class="table-controls" aria-label="Period table pagination">
+          <span>Page ${escapeHtml(page.currentPage)} of ${escapeHtml(page.totalPages)} · Showing ${escapeHtml(page.startRow)}-${escapeHtml(page.endRow)} of ${escapeHtml(page.totalRows)} period week rows</span>
+          <div class="button-row">
+            <button type="button" class="secondary" data-action="period-page-prev" ${page.currentPage <= 1 ? 'disabled' : ''}>Previous</button>
+            <button type="button" class="secondary" data-action="period-page-next" ${page.currentPage >= page.totalPages ? 'disabled' : ''}>Next</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <caption>Comparable week review for broad selected scope</caption>
+            <thead>
+              <tr>
+                <th>${escapeHtml(labels.periodLens)}</th>
+                <th>${escapeHtml(labels.comparisonSide)}</th>
+                <th>${escapeHtml(labels.comparableSlot)}</th>
+                <th>Financial Year</th>
+                <th>Week</th>
+                <th>Month</th>
+                <th>Week Ending</th>
+                <th>Fixed Comparison</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${page.rows.map((row) => `
+                <tr>
+                  <td>${escapeHtml(row.period_type)}</td>
+                  <td>${escapeHtml(row.comparison_side)}</td>
+                  <td>${escapeHtml(row.comparable_week_slot)}</td>
+                  <td>${escapeHtml(row.financial_year || '-')}</td>
+                  <td>${escapeHtml(row.week_of_year)}</td>
+                  <td>${escapeHtml(row.month_of_year)}</td>
+                  <td>${escapeHtml(row.week_ending)}</td>
+                  <td>${escapeHtml(row.comparison_mode || '-')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    const page = getPeriodPage(reviewRows, state.periodPage);
     return `
       <div class="table-controls" aria-label="Period table pagination">
         <span>Page ${escapeHtml(page.currentPage)} of ${escapeHtml(page.totalPages)} · Showing ${escapeHtml(page.startRow)}-${escapeHtml(page.endRow)} of ${escapeHtml(page.totalRows)} period week rows</span>
@@ -1252,6 +1332,7 @@ export function createApp(root) {
   function renderPeriodTableRow(row) {
     const override = manualOverrideForWeek(row.week_ending);
     const contextAttributes = periodContextAttributes(row);
+    const overrideDisabled = singleOverrideScope() ? '' : 'disabled';
     return `
       <tr>
         <td>${escapeHtml(row.period_type)}</td>
@@ -1265,11 +1346,11 @@ export function createApp(root) {
         <td>${escapeHtml(row.source_data_exists ?? 'Unknown')}</td>
         <td>${escapeHtml(row.system_include_flag)}</td>
         <td>
-          <button type="button" class="chip" data-action="toggle-override" data-week-ending="${escapeAttribute(row.week_ending)}" ${contextAttributes}>${escapeHtml(override.manual_include_flag)}</button>
+          <button type="button" class="chip" data-action="toggle-override" data-week-ending="${escapeAttribute(row.week_ending)}" ${contextAttributes} ${overrideDisabled}>${escapeHtml(override.manual_include_flag)}</button>
         </td>
         <td>${escapeHtml(row.effective_include_flag)}</td>
         <td>${escapeHtml(row.final_include_flag)}</td>
-        <td><input class="reason-input" data-action="edit-override-reason" data-week-ending="${escapeAttribute(row.week_ending)}" ${contextAttributes} value="${escapeAttribute(displayOutcomeReason(row, override))}" /></td>
+        <td><input class="reason-input" data-action="edit-override-reason" data-week-ending="${escapeAttribute(row.week_ending)}" ${contextAttributes} value="${escapeAttribute(displayOutcomeReason(row, override))}" ${overrideDisabled} /></td>
         <td>${escapeHtml(propagationImpact(row))}</td>
       </tr>
     `;
@@ -1278,11 +1359,15 @@ export function createApp(root) {
   function bindEvents() {
     bindAll('refresh-source', 'click', refreshSource);
     root.querySelector('[data-action="select-store"]')?.addEventListener('change', (event) => updateSelection({ storeCode: event.target.value }));
-    root.querySelector('[data-action="select-metric"]')?.addEventListener('change', (event) => updateSelection({ metric: event.target.value }));
+    root.querySelector('[data-action="select-metrics"]')?.addEventListener('change', (event) => {
+      const metrics = Array.from(event.target.selectedOptions || []).map((option) => option.value).filter(Boolean);
+      updateSelection({ metrics });
+    });
     root.querySelector('[data-action="select-period-type"]')?.addEventListener('change', (event) => {
       markScopeChanged();
       state.reviewConfirmed = false;
       state.selectedPeriodType = event.target.value;
+      state.activeStepId = 'mask';
       state.periodPage = 1;
       state.pendingWrite = null;
       state.status = `Selected Period Lens: ${state.selectedPeriodType}.`;
@@ -1293,6 +1378,9 @@ export function createApp(root) {
     bindAll('run-l4l-workflow', 'click', runL4LWorkflow);
     bindAll('refresh-l4l-results', 'click', refreshL4LResults);
     bindAll('toggle-l4l-coverage', 'click', () => setL4LCoverageMode(!state.l4lComparableCoverageOn));
+    bindAll('open-workflow-step', 'click', openWorkflowStep);
+    bindAll('start-new-run', 'click', startNewRun);
+    bindAll('change-scope', 'click', changeScope);
     bindAll('toggle-diagnostics', 'click', toggleDiagnostics);
     bindAll('close-diagnostics', 'click', closeDiagnostics);
     root.querySelector('[data-action="complete-execution-modal"]')?.addEventListener('click', completeExecutionModal);
@@ -1362,6 +1450,49 @@ export function createApp(root) {
     });
   }
 
+  function openWorkflowStep(event) {
+    const stepId = event.currentTarget?.dataset?.stepId || '';
+    const step = workflowSteps().find((item) => item.id === stepId);
+    if (!step || step.status === 'locked') return;
+
+    state.activeStepId = step.id;
+    state.status = `${step.title} is in focus.`;
+    render();
+  }
+
+  function changeScope() {
+    state.activeStepId = 'mask';
+    state.status = 'Choose a Store, Metric, or Period Lens in the active work area.';
+    render();
+  }
+
+  function startNewRun() {
+    state.reviewConfirmed = false;
+    state.comparisonRefreshPending = false;
+    state.workflowCompletedAt = '';
+    state.scopeDirty = false;
+    state.pendingWrite = null;
+    state.lastRun = null;
+    state.workflowProgress = null;
+    state.executionModal = null;
+    state.l4lRows = [];
+    state.l4lValidation = { valid: true, missingFields: [] };
+    state.l4lSource = 'none';
+    state.l4lMessage = 'Select a Store, Metric, and Period Lens, then confirm Comparable Week Review.';
+    state.activeStepId = 'mask';
+    state.activeEvidenceTab = 'excluded';
+    state.stepAcknowledged = {
+      mask: false,
+      workflow: false
+    };
+    state.stepCompletion = {
+      mask: false
+    };
+    state.validationSummary = null;
+    state.status = 'New run started. Confirm Comparable Week Review before rebuilding the selected-scope mask.';
+    render();
+  }
+
   async function refreshSource() {
     setLoading('Refreshing source profile...');
     try {
@@ -1373,8 +1504,10 @@ export function createApp(root) {
       state.periodRows = periods.rows;
       state.periodPage = 1;
       state.reviewConfirmed = false;
+      state.activeStepId = 'mask';
       if (!state.selectedStoreCode) state.selectedStoreCode = sourceResult.profile?.stores?.[0]?.store_code || '';
-      if (!state.selectedMetric) state.selectedMetric = sourceResult.profile?.metrics?.[0]?.metric || '';
+      state.selectedMetrics = resolveMetrics(sourceResult.profile, state.selectedMetrics, state.selectedMetric);
+      state.selectedMetric = state.selectedMetrics[0] || '';
       if (!state.selectedPeriodType) state.selectedPeriodType = periods.rows[0]?.period_type || '';
       state.manualOverrides = await loadOverridesForSelection();
       state.diagnostics = mergeDiagnostics(state.diagnostics, sourceResult.diagnostics);
@@ -1397,11 +1530,13 @@ export function createApp(root) {
 
     const runId = createRunId();
     const generatedAt = new Date().toISOString();
+    const stores = selectedStores();
     const store = selectedStore();
+    const metrics = selectedMetricList();
     const scopeSummary = selectedScopeSummary();
     const maskRows = generateMaskRows({
-      stores: store ? [store] : [],
-      metrics: state.selectedMetric ? [state.selectedMetric] : [],
+      stores,
+      metrics,
       periodRows: selectedPeriodRows(),
       manualOverrides: state.manualOverrides,
       runId,
@@ -1417,8 +1552,8 @@ export function createApp(root) {
       periodRows: selectedPeriodRows(),
       maskRows,
       generationMode: 'SELECTED_SCOPE',
-      selectedStore: store?.store_code || '',
-      selectedMetric: state.selectedMetric,
+      selectedStore: selectedStoreValueForRun(),
+      selectedMetric: selectedMetricValueForRun(),
       selectedPeriodType: state.selectedPeriodType,
       outputCollection: COLLECTIONS.selectedScopeMask,
       rebuildStatus: 'pending_confirmation'
@@ -1428,8 +1563,12 @@ export function createApp(root) {
       profile: state.sourceProfile,
       periodRows: selectedPeriodRows(),
       maskRows,
-      selectedStore: store,
-      selectedMetric: state.selectedMetric,
+      selectedStore: selectedScopeSummaryStore(),
+      selectedMetric: singleMetricSelection() ? selectedMetricList()[0] : '',
+      selectedStoreLabel: selectedStoreValueForRun(),
+      selectedMetricLabel: selectedMetricValueForRun(),
+      selectedStoreCodes: selectedStores().map((item) => item.store_code),
+      selectedMetrics: selectedMetricList(),
       selectedPeriodType: state.selectedPeriodType,
       selectedScopeSummary: scopeSummary,
       generationMode: 'SELECTED_SCOPE',
@@ -1450,8 +1589,8 @@ export function createApp(root) {
       ],
       generationMode: 'SELECTED_SCOPE',
       outputCollection: COLLECTIONS.selectedScopeMask,
-      selectedStore: store?.store_code || '',
-      selectedMetric: state.selectedMetric,
+      selectedStore: selectedStoreValueForRun(),
+      selectedMetric: selectedMetricValueForRun(),
       selectedPeriodType: state.selectedPeriodType
     };
     state.status = `Review the selected-scope rebuild confirmation for ${runId}.`;
@@ -1501,6 +1640,7 @@ export function createApp(root) {
       state.stepCompletion.mask = true;
       state.stepAcknowledged.mask = false;
       state.stepAcknowledged.workflow = false;
+      state.activeStepId = 'mask';
       state.scopeDirty = false;
       state.l4lRows = [];
       state.l4lValidation = { valid: true, missingFields: [] };
@@ -1534,13 +1674,19 @@ export function createApp(root) {
     }
   }
 
-  async function updateSelection({ storeCode = state.selectedStoreCode, metric = state.selectedMetric } = {}) {
-    if (storeCode !== state.selectedStoreCode || metric !== state.selectedMetric) {
+  async function updateSelection({
+    storeCode = state.selectedStoreCode,
+    metric = state.selectedMetric,
+    metrics = selectedMetricList()
+  } = {}) {
+    const nextMetrics = Array.isArray(metrics) && metrics.length ? metrics : [metric].filter(Boolean);
+    if (storeCode !== state.selectedStoreCode || nextMetrics.join('|') !== selectedMetricList().join('|')) {
       markScopeChanged();
       state.reviewConfirmed = false;
     }
     state.selectedStoreCode = storeCode;
-    state.selectedMetric = metric;
+    state.selectedMetrics = nextMetrics;
+    state.selectedMetric = nextMetrics[0] || '';
     state.periodPage = 1;
     state.pendingWrite = null;
     state.loading = true;
@@ -1549,7 +1695,7 @@ export function createApp(root) {
 
     try {
       state.manualOverrides = await loadOverridesForSelection();
-      state.status = `Loaded manual coverage adjustments for ${state.selectedStoreCode} / ${state.selectedMetric}.`;
+      state.status = `Loaded manual coverage adjustments for ${selectedStoreDisplay()} / ${selectedMetricDisplay()}.`;
       state.error = '';
     } catch (error) {
       state.error = readableError(error);
@@ -1565,6 +1711,7 @@ export function createApp(root) {
     if (!hasGeneratedContext) return;
 
     state.scopeDirty = true;
+    state.activeStepId = 'mask';
     state.stepCompletion.mask = false;
     state.stepAcknowledged.mask = false;
     state.stepAcknowledged.workflow = false;
@@ -1575,12 +1722,12 @@ export function createApp(root) {
   }
 
   async function loadOverridesForSelection() {
-    if (!state.selectedStoreCode || !state.selectedMetric) return [];
+    if (!state.selectedStoreCode || !selectedMetricList().length) return [];
 
     try {
-      const overrides = await loadManualOverrides({
-        storeCode: state.selectedStoreCode,
-        metric: state.selectedMetric
+      const overrides = await loadManualOverridesForScope({
+        storeCodes: selectedStores().map((store) => store.store_code),
+        metrics: selectedMetricList()
       });
       state.diagnostics = mergeDiagnostics(state.diagnostics, {
         appDb: {
@@ -1609,22 +1756,32 @@ export function createApp(root) {
 
   async function saveOverrides() {
     const store = selectedStore();
-    if (!store || !state.selectedMetric) {
-      state.error = 'Select a Store and Metric before saving overrides.';
+    if (!scopeSelectionReady()) {
+      state.error = 'Select a Store, at least one Metric, and a Period Lens before saving overrides.';
       render();
       return;
     }
 
-    setLoading(`Saving manual coverage adjustments for ${store.store_code} / ${state.selectedMetric}...`);
+    if (!singleOverrideScope()) {
+      state.reviewConfirmed = true;
+      state.activeStepId = 'mask';
+      state.status = `Comparable Week Review confirmed for ${selectedStoreDisplay()} / ${selectedMetricDisplay()}. Existing active overrides will be applied during mask generation.`;
+      state.error = '';
+      render();
+      return;
+    }
+
+    setLoading(`Saving manual coverage adjustments for ${store.store_code} / ${selectedMetricList()[0]}...`);
     try {
       const result = await saveManualOverrides({
         store,
-        metric: state.selectedMetric,
+        metric: selectedMetricList()[0],
         overrides: state.manualOverrides,
         updatedBy: 'Domo app user'
       });
       state.manualOverrides = await loadOverridesForSelection();
       state.reviewConfirmed = true;
+      state.activeStepId = 'mask';
       state.status = `Saved ${result.savedCount} manual coverage adjustment document(s).`;
       state.error = '';
     } catch (error) {
@@ -1679,6 +1836,7 @@ export function createApp(root) {
         state.l4lValidation = { valid: true, missingFields: [] };
         state.l4lMessage = 'Workflow completed. Domo may still be refreshing the output dataset. Click Refresh Results after the Domo dataset refresh completes.';
         state.stepAcknowledged.workflow = false;
+        state.activeStepId = 'workflow';
         state.status = state.l4lMessage;
         state.error = '';
         state.executionModal = {
@@ -1749,13 +1907,18 @@ export function createApp(root) {
       if (!result.empty && result.rows.length) {
         state.comparisonRefreshPending = false;
         state.stepAcknowledged.workflow = true;
+        state.activeStepId = 'results';
+      } else {
+        state.activeStepId = 'workflow';
       }
       state.executionModal = {
         type: 'refresh',
         status: 'success',
         currentStage: 3,
-        message: 'L4L comparison results refreshed.',
-        resultSummary: result.empty ? result.message : `Loaded ${result.rows.length} L4L comparison fact row(s).`
+        title: result.empty ? 'No Results Yet' : 'Results Refreshed',
+        message: result.empty ? 'No L4L comparison results are available yet.' : 'L4L comparison results refreshed.',
+        resultSummary: result.empty ? result.message : `Loaded ${result.rows.length} L4L comparison fact row(s).`,
+        completeLabel: result.empty ? 'Complete and Stay on Workflow' : 'Complete and Review Results'
       };
     } catch (error) {
       state.error = `Unable to refresh L4L comparison results: ${readableError(error)}`;
@@ -1791,11 +1954,13 @@ export function createApp(root) {
   function completeExecutionModal() {
     if (state.executionModal?.type === 'mask') {
       state.stepAcknowledged.mask = true;
+      state.activeStepId = 'workflow';
       state.status = 'Selected-scope mask is ready. Prepare L4L comparison facts next.';
     }
 
     if (state.executionModal?.type === 'workflow') {
       state.stepAcknowledged.workflow = true;
+      state.activeStepId = state.l4lRows.length ? 'results' : 'workflow';
       state.status = state.comparisonRefreshPending
         ? 'Workflow completed. Domo may still be refreshing the output dataset. Click Refresh Results after the Domo dataset refresh completes.'
         : state.l4lRows.length
@@ -1804,6 +1969,7 @@ export function createApp(root) {
     }
 
     if (state.executionModal?.type === 'refresh') {
+      state.activeStepId = state.l4lRows.length ? 'results' : 'workflow';
       state.status = state.l4lRows.length
         ? 'L4L comparison results are ready.'
         : state.l4lMessage || 'Refresh completed.';
@@ -1829,13 +1995,60 @@ export function createApp(root) {
   }
 
   function selectedStore() {
+    if (state.selectedStoreCode === ALL_STORES_VALUE) return null;
     return (state.sourceProfile?.stores || []).find((store) => store.store_code === state.selectedStoreCode) || null;
   }
 
+  function selectedStores() {
+    const stores = state.sourceProfile?.stores || [];
+    if (state.selectedStoreCode === ALL_STORES_VALUE) return stores;
+    return selectedStore() ? [selectedStore()] : [];
+  }
+
   function selectedStoreDisplay() {
+    if (state.selectedStoreCode === ALL_STORES_VALUE) return 'All Stores';
     const store = selectedStore();
     if (!store) return '-';
     return `${store.store_code}${store.store_name ? ` - ${store.store_name}` : ''}`;
+  }
+
+  function selectedStoreValueForRun() {
+    return state.selectedStoreCode === ALL_STORES_VALUE ? 'All Stores' : selectedStore()?.store_code || '';
+  }
+
+  function selectedScopeSummaryStore() {
+    if (state.selectedStoreCode !== ALL_STORES_VALUE) return selectedStore();
+    return { store_code: 'All Stores', store_name: 'All Stores', region: '', store_trading_commencement_date: 'MULTI', store_closure_date: '' };
+  }
+
+  function selectedMetricList() {
+    return (Array.isArray(state.selectedMetrics) && state.selectedMetrics.length)
+      ? state.selectedMetrics
+      : [state.selectedMetric].filter(Boolean);
+  }
+
+  function selectedMetricDisplay() {
+    const metrics = selectedMetricList();
+    if (!metrics.length) return '-';
+    if (metrics.length === 1) return metrics[0];
+    return `${metrics.length} metrics selected`;
+  }
+
+  function selectedMetricValueForRun() {
+    const metrics = selectedMetricList();
+    return metrics.length <= 3 ? metrics.join(', ') : `${metrics.length} metrics selected`;
+  }
+
+  function singleMetricSelection() {
+    return selectedMetricList().length === 1;
+  }
+
+  function singleOverrideScope() {
+    return state.selectedStoreCode !== ALL_STORES_VALUE && Boolean(selectedStore()) && singleMetricSelection();
+  }
+
+  function scopeSelectionReady() {
+    return Boolean(state.selectedStoreCode && selectedMetricList().length && state.selectedPeriodType);
   }
 
   function selectedPeriodRows() {
@@ -1847,7 +2060,9 @@ export function createApp(root) {
       sourceRows: state.sourceRows,
       sourceFacts: state.sourceProfile?.sourceFacts,
       selectedStore: selectedStore(),
-      selectedMetric: state.selectedMetric,
+      selectedStores: selectedStores(),
+      selectedMetric: singleMetricSelection() ? selectedMetricList()[0] : '',
+      selectedMetrics: selectedMetricList(),
       selectedPeriodType: state.selectedPeriodType,
       periodRows: state.periodRows,
       manualOverrides: state.manualOverrides,
@@ -1857,11 +2072,11 @@ export function createApp(root) {
 
   function reviewRowsForRows(periodRows) {
     const store = selectedStore();
-    if (!store || !state.selectedMetric) return [];
+    if (!store || !singleMetricSelection()) return [];
 
     return generateMaskRows({
       stores: [store],
-      metrics: [state.selectedMetric],
+      metrics: selectedMetricList(),
       periodRows,
       manualOverrides: state.manualOverrides,
       runId: 'review',
@@ -1877,9 +2092,20 @@ export function createApp(root) {
   }
 
   function manualOverrideForWeek(weekEnding) {
+    if (!singleOverrideScope()) {
+      return {
+        store_code: '',
+        metric: '',
+        week_ending: weekEnding,
+        manual_include_flag: FLAGS.yes,
+        manual_reason: '',
+        manual_note: ''
+      };
+    }
+
     return state.manualOverrides.find((override) => override.week_ending === weekEnding) || {
       store_code: state.selectedStoreCode,
-      metric: state.selectedMetric,
+      metric: selectedMetricList()[0],
       week_ending: weekEnding,
       manual_include_flag: FLAGS.yes,
       manual_reason: '',
@@ -1892,7 +2118,7 @@ export function createApp(root) {
       sourceRows: state.sourceRows,
       sourceFacts: state.sourceProfile?.sourceFacts,
       storeCode: state.selectedStoreCode,
-      metric: state.selectedMetric,
+      metric: selectedMetricList()[0],
       weekEnding
     });
   }
@@ -1957,7 +2183,7 @@ export function createApp(root) {
       ...context,
       ...patch,
       store_code: state.selectedStoreCode,
-      metric: state.selectedMetric,
+      metric: selectedMetricList()[0] || '',
       week_ending: weekEnding,
       override_scope: 'STORE_METRIC_WEEK'
     };
@@ -1998,6 +2224,7 @@ function persistUiState(state) {
     sessionStorage.setItem(CCM_UI_STATE_STORAGE_KEY, JSON.stringify({
       selectedStoreCode: state.selectedStoreCode,
       selectedMetric: state.selectedMetric,
+      selectedMetrics: selectedMetricList(),
       selectedPeriodType: state.selectedPeriodType,
       periodPage: state.periodPage,
       reviewConfirmed: state.reviewConfirmed,
@@ -2007,6 +2234,7 @@ function persistUiState(state) {
       status: state.status,
       l4lMessage: state.l4lMessage,
       l4lComparableCoverageOn: state.l4lComparableCoverageOn,
+      activeStepId: state.activeStepId,
       diagnosticsOpen: state.diagnosticsOpen,
       activeEvidenceTab: state.activeEvidenceTab,
       excludedFilters: state.excludedFilters,
@@ -2021,6 +2249,7 @@ function persistUiState(state) {
 
 function resolveStoreCode(profile, preferredStoreCode) {
   const stores = profile?.stores || [];
+  if (preferredStoreCode === ALL_STORES_VALUE) return ALL_STORES_VALUE;
   if (stores.some((store) => store.store_code === preferredStoreCode)) return preferredStoreCode;
   return stores[0]?.store_code || '';
 }
@@ -2029,6 +2258,18 @@ function resolveMetric(profile, preferredMetric) {
   const metrics = profile?.metrics || [];
   if (metrics.some((item) => item.metric === preferredMetric)) return preferredMetric;
   return metrics[0]?.metric || '';
+}
+
+function resolveMetrics(profile, preferredMetrics = [], preferredMetric = '') {
+  const available = new Set((profile?.metrics || []).map((item) => item.metric));
+  const preferred = [
+    ...(Array.isArray(preferredMetrics) ? preferredMetrics : []),
+    preferredMetric
+  ].filter(Boolean);
+  const resolved = Array.from(new Set(preferred)).filter((metric) => available.has(metric));
+  if (resolved.length) return resolved;
+  const fallback = resolveMetric(profile, preferredMetric);
+  return fallback ? [fallback] : [];
 }
 
 function resolvePeriodType(periodRows, preferredPeriodType) {

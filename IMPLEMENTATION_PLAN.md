@@ -29,16 +29,21 @@ Phase 1 does not implement full CCM mask generation.
 - Keep `src/periodDefinition.js`.
 - Derive period weeks from source calendar fields.
 - Support fixed period types:
-  - `Last Week`
-  - `Last Month`
-  - `Last Quarter`
-  - `Year to Date`
+  - `Last Completed Week`
+  - `Last Completed Month`
+  - `Last Completed Quarter`
+  - `Year To Date`
+  - `Quarter To Date`
+  - `Month To Date`
+- Derive comparison mode from Period Lens instead of exposing comparison/history controls.
+- Use 13 fiscal weeks per quarter.
 
 ## Phase D: UI
 
 - Rename the period area to `Comparable Week Review / Override Editor`.
 - Add a Global Dataset Overview for unfiltered source totals.
-- Add Store, Metric, and Period Type selectors in a dedicated Selection panel.
+- Add Store, multi-select Metric, and Period Type selectors in a dedicated Selection panel.
+- Include an `All Stores` Store option.
 - Add a Selected Scope Summary that recalculates only from the selected Store + Metric + Period Type.
 - Show runtime-derived comparable weeks.
 - Let users edit manual include/reason/note per Store + Metric + Week.
@@ -55,6 +60,7 @@ Phase 1 does not implement full CCM mask generation.
 - Apply manual overrides.
 - Propagate Store + Metric + Week exclusions anywhere the same week appears.
 - Propagate current/prior pair exclusions only within the same period type and slot.
+- Exclude comparable slots that exist on only one required comparison side with `UNPAIRED_PERIOD_WEEK`.
 - Preserve missing source fact weeks as included when system/manual rules allow them.
 - Show Week 53 rows when relevant, but automatically exclude them with `WEEK_53_EXCLUDED`.
 - Before insert, clear `ccm_selected_scope_mask`.

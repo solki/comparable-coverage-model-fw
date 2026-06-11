@@ -130,6 +130,29 @@ test('HCI redesign improves completion acknowledgement and manual workflow fallb
   assert.match(uiSource, /Workflow could not be started\. No comparison facts were changed/);
 });
 
+test('workflow UI supports repeat runs without pinning users to the final evidence step', () => {
+  const uiSource = readFileSync('src/ui.js', 'utf8');
+
+  assert.match(uiSource, /activeStepId/);
+  assert.match(uiSource, /data-action="open-workflow-step"/);
+  assert.match(uiSource, /data-action="start-new-run"/);
+  assert.match(uiSource, /Start New Run/);
+  assert.match(uiSource, /Change Store \/ Metric \/ Period/);
+  assert.match(uiSource, /state\.activeStepId = 'mask'/);
+  assert.match(uiSource, /state\.reviewConfirmed = false/);
+});
+
+test('next action strip is guidance only so users act inside the active workspace', () => {
+  const uiSource = readFileSync('src/ui.js', 'utf8');
+  const nextActionBlock = uiSource.slice(
+    uiSource.indexOf('function renderNextActionStrip'),
+    uiSource.indexOf('function renderWorkflowRail')
+  );
+
+  assert.doesNotMatch(nextActionBlock, /data-action="\$\{escapeAttribute\(action\.action\)\}"/);
+  assert.match(nextActionBlock, /Use the active work area below/);
+});
+
 test('all rendered buttons declare type button to avoid form-submit page reloads in Domo shells', () => {
   const uiSource = readFileSync('src/ui.js', 'utf8');
   const buttonsWithoutType = uiSource.match(/<button\b(?![^>]*\btype=)[^>]*>/g) || [];
@@ -190,4 +213,33 @@ test('Build Coverage Mask is gated until Comparable Week Review is saved', () =>
   assert.match(uiSource, /state\.reviewConfirmed = true/);
   assert.match(uiSource, /state\.reviewConfirmed = false/);
   assert.match(uiSource, /!state\.reviewConfirmed/);
+});
+
+test('active UI exposes only Period Lens and hides Compare Against and History Window controls', () => {
+  const uiSource = readFileSync('src/ui.js', 'utf8');
+  const selectionBlock = uiSource.slice(
+    uiSource.indexOf('function renderSelectionControls'),
+    uiSource.indexOf('function renderSelectedScopeSummary')
+  );
+
+  assert.match(selectionBlock, /data-action="select-period-type"/);
+  assert.match(selectionBlock, /Fixed comparison/);
+  assert.doesNotMatch(selectionBlock, /Compare Against/);
+  assert.doesNotMatch(selectionBlock, /History Window/);
+  assert.doesNotMatch(selectionBlock, /data-action="select-compare-against"/);
+  assert.doesNotMatch(selectionBlock, /data-action="select-history-window"/);
+});
+
+test('selection UI supports All Stores and multiple metrics', () => {
+  const uiSource = readFileSync('src/ui.js', 'utf8');
+  const selectionBlock = uiSource.slice(
+    uiSource.indexOf('function renderSelectionControls'),
+    uiSource.indexOf('function renderSelectedScopeSummary')
+  );
+
+  assert.match(selectionBlock, /All Stores/);
+  assert.match(selectionBlock, /data-action="select-metrics"/);
+  assert.match(selectionBlock, /multiple/);
+  assert.match(uiSource, /selectedMetrics/);
+  assert.match(uiSource, /loadManualOverridesForScope/);
 });

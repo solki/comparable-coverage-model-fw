@@ -42,35 +42,59 @@ Legacy `ccm_l4l_week_mask` is not mapped, cleared, or written by version 1.0.2. 
 
 `src/periodDefinition.js` derives comparable week rows from source calendar fields.
 
-### Last Week
+### Last Completed Week
 
-- Current label: `Last Week`
-- Prior label: `2 Weeks Ago`
+- Current label: `Last Completed Week`
+- Prior label: `Previous Week`
 - Current period: current FY max `Week Of Year - 1`
 - Prior period: current FY max `Week Of Year - 2`
+- Comparison mode: `Previous Period`
 
-### Last Month
+### Last Completed Month
 
-- Current label: `Last Month`
-- Prior label: `Month Before`
+- Current label: `Last Completed Month`
+- Prior label: `Previous Month`
 - Current period: max `Month of Year` where `FC Last Month Flag = Y`
 - Prior period: current month minus one fiscal month
+- Comparison mode: `Previous Period`
 
-### Last Quarter
+### Last Completed Quarter
 
-- Current label: `Last Quarter`
-- Prior label: `Quarter Before`
-- Anchor: max `Month of Year` where `FC Current Month Flag = Y`
-- Current months: anchor - 1, anchor - 2, anchor - 3
-- Prior months: anchor - 4, anchor - 5, anchor - 6
+- Current label: `Last Completed Quarter`
+- Prior label: `Previous Quarter`
+- Target week: current FY max `Week Of Year - 1`
+- Current period: 13 fiscal weeks ending at the target week
+- Prior period: the previous 13 fiscal weeks before the current 13-week window
+- Comparison mode: `Previous Period`
 
-### Year to Date
+### Year To Date
 
 - Current label: `YTD`
-- Prior label: `Prior YTD`
+- Prior label: `Prior Year YTD`
 - Target week: current FY max `Week Of Year - 1`
 - Current side: `FC Current FY Flag = Y` and `Week Of Year <= target_week`
 - Prior side: `FC Last FY Flag = Y` and `Week Of Year <= target_week`
+- Comparison mode: `Same Period Last Year`
+
+### Quarter To Date
+
+- Current label: `QTD`
+- Prior label: `Prior Year QTD`
+- Quarter definition: 13 fiscal weeks per quarter
+- Target week: current FY max `Week Of Year - 1`
+- Current side: current fiscal quarter start through target week
+- Prior side: same fiscal quarter week range in the prior fiscal year
+- Comparison mode: `Same Period Last Year`
+
+### Month To Date
+
+- Current label: `MTD`
+- Prior label: `Prior Year MTD`
+- Current month: max `Month of Year` where `FC Current Month Flag = Y`
+- Target week: current FY max `Week Of Year - 1`
+- Current side: current fiscal month rows through target week
+- Prior side: same fiscal month rows in the prior fiscal year through target week
+- Comparison mode: `Same Period Last Year`
 
 ## Trading Expectation Logic
 
@@ -113,6 +137,17 @@ Rule 2: Paired slot propagation
 Within the same `period_type + comparable_week_slot + store_code + metric`, if either current or prior side is excluded, both sides are excluded.
 
 Paired-slot propagation does not cross Period Lenses.
+
+Rule 3: Unpaired comparable slot exclusion
+
+All LFL decisions are evaluated by Store + Metric + Period Lens + Comparison Mode + Comparable Slot. If a comparable slot exists on only one required comparison side, the row remains visible in LFL OFF but is excluded from LFL ON.
+
+Use:
+
+- `paired_slot_include_flag = N`
+- `final_include_flag = N`
+- `mask_include_flag = N`
+- `final_reason_code = UNPAIRED_PERIOD_WEEK`
 
 ## Week 53
 

@@ -7,6 +7,10 @@ export function buildValidationSummary({
   maskRows,
   selectedStore = null,
   selectedMetric = '',
+  selectedStoreLabel = '',
+  selectedMetricLabel = '',
+  selectedStoreCodes = [],
+  selectedMetrics = [],
   selectedPeriodType = '',
   selectedScopeSummary = {},
   generationMode = 'SELECTED_SCOPE',
@@ -19,6 +23,8 @@ export function buildValidationSummary({
     maskRows,
     selectedStore,
     selectedMetric,
+    selectedStoreCodes,
+    selectedMetrics,
     selectedPeriodType
   });
 
@@ -26,8 +32,8 @@ export function buildValidationSummary({
     run_id: runId,
     generation_mode: generationMode,
     output_collection: outputCollection,
-    selected_store: selectedStore?.store_code || '',
-    selected_metric: selectedMetric || '',
+    selected_store: selectedStoreLabel || selectedStore?.store_code || '',
+    selected_metric: selectedMetricLabel || selectedMetric || '',
     selected_period_type: selectedPeriodType || '',
     total_mask_rows: scoped.total_mask_rows,
     included_mask_rows: scoped.included_mask_rows,
@@ -50,9 +56,15 @@ export function computeSelectedScopeValidation({
   maskRows = [],
   selectedStore = null,
   selectedMetric = '',
+  selectedStoreCodes = [],
+  selectedMetrics = [],
   selectedPeriodType = ''
 } = {}) {
-  const scopedRows = filterMaskRows(maskRows, selectedStore?.store_code || '', selectedMetric, selectedPeriodType);
+  const scopedRows = filterMaskRows(maskRows, {
+    storeCodes: selectedStoreCodes.length ? selectedStoreCodes : [selectedStore?.store_code].filter(Boolean),
+    metrics: selectedMetrics.length ? selectedMetrics : [selectedMetric].filter(Boolean),
+    periodType: selectedPeriodType
+  });
 
   return {
     maskRows: scopedRows,
@@ -90,10 +102,12 @@ function countDistinctStoresBy(rows, field) {
   );
 }
 
-function filterMaskRows(maskRows, storeCode, metric, periodType) {
+function filterMaskRows(maskRows, { storeCodes = [], metrics = [], periodType = '' } = {}) {
+  const storeSet = new Set(storeCodes.filter(Boolean));
+  const metricSet = new Set(metrics.filter(Boolean));
   return (Array.isArray(maskRows) ? maskRows : []).filter((row) => (
-    (!storeCode || row.store_code === storeCode)
-    && (!metric || row.metric === metric)
+    (!storeSet.size || storeSet.has(row.store_code))
+    && (!metricSet.size || metricSet.has(row.metric))
     && (!periodType || row.period_type === periodType)
   ));
 }

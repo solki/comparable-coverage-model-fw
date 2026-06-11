@@ -1,19 +1,46 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { COMPARISON_MODES, PERIOD_TYPES } from '../src/constants.js';
 import { deriveRuntimePeriodDefinitions } from '../src/periodDefinition.js';
 
-const sourceRows = [
-  row({ week: 1, month: 1, fy: '24-25', weekEnding: '2024-07-07', lastFy: 'Y' }),
-  row({ week: 2, month: 2, fy: '24-25', weekEnding: '2024-07-14', lastFy: 'Y' }),
-  row({ week: 3, month: 3, fy: '24-25', weekEnding: '2024-07-21', lastFy: 'Y' }),
-  row({ week: 4, month: 11, fy: '24-25', weekEnding: '2025-05-04', lastFy: 'Y' }),
-  row({ week: 5, month: 12, fy: '24-25', weekEnding: '2025-06-01', lastFy: 'Y' }),
-  row({ week: 9, month: 2, fy: '25-26', weekEnding: '2025-08-31', currentFy: 'Y' }),
-  row({ week: 10, month: 3, fy: '25-26', weekEnding: '2025-09-07', currentFy: 'Y' }),
-  row({ week: 11, month: 4, fy: '25-26', weekEnding: '2025-09-14', currentFy: 'Y', lastMonth: 'Y' }),
-  row({ week: 12, month: 5, fy: '25-26', weekEnding: '2025-09-21', currentFy: 'Y', currentMonth: 'Y' })
-];
+const sourceRows = buildFiscalRows();
+
+function buildFiscalRows() {
+  const rows = [];
+  const baseCurrent = Date.UTC(2025, 6, 6);
+  const basePrior = Date.UTC(2024, 6, 7);
+
+  for (let week = 1; week <= 40; week += 1) {
+    rows.push(row({
+      week,
+      month: fiscalMonthForWeek(week),
+      fy: '24-25',
+      weekEnding: addWeeks(basePrior, week - 1),
+      lastFy: 'Y'
+    }));
+    rows.push(row({
+      week,
+      month: fiscalMonthForWeek(week),
+      fy: '25-26',
+      weekEnding: addWeeks(baseCurrent, week - 1),
+      currentFy: 'Y',
+      currentMonth: week >= 37 && week <= 40 ? 'Y' : 'N',
+      lastMonth: week >= 33 && week <= 36 ? 'Y' : 'N'
+    }));
+  }
+
+  return rows;
+}
+
+function fiscalMonthForWeek(week) {
+  return Math.min(12, Math.floor((week - 1) / 4) + 1);
+}
+
+function addWeeks(baseDate, offset) {
+  const date = new Date(baseDate + offset * 7 * 24 * 60 * 60 * 1000);
+  return date.toISOString().slice(0, 10);
+}
 
 function row({ week, month, fy, weekEnding, currentFy = 'N', currentMonth = 'N', lastMonth = 'N', lastFy = 'N' }) {
   return {
@@ -37,65 +64,106 @@ function row({ week, month, fy, weekEnding, currentFy = 'N', currentMonth = 'N',
   };
 }
 
-test('derives Last Week as current FY max week minus one and prior as minus two', () => {
-  const definitions = deriveRuntimePeriodDefinitions(sourceRows);
-
-  const current = definitions.find((item) => item.period_type === 'Last Week' && item.comparison_side === 'current');
-  const prior = definitions.find((item) => item.period_type === 'Last Week' && item.comparison_side === 'prior');
-
-  assert.equal(current.period_label_current, 'Last Week');
-  assert.equal(current.period_label_prior, '2 Weeks Ago');
-  assert.equal(current.week_of_year, 11);
-  assert.equal(current.week_ending, '2025-09-14');
-  assert.equal(prior.week_of_year, 10);
-  assert.equal(prior.week_ending, '2025-09-07');
-});
-
-test('derives Last Month from FC Last Month Flag and prior from the previous fiscal month', () => {
-  const definitions = deriveRuntimePeriodDefinitions(sourceRows);
-
-  const currentRows = definitions.filter((item) => item.period_type === 'Last Month' && item.comparison_side === 'current');
-  const priorRows = definitions.filter((item) => item.period_type === 'Last Month' && item.comparison_side === 'prior');
-
-  assert.deepEqual(currentRows.map((item) => item.month_of_year), [4]);
-  assert.deepEqual(currentRows.map((item) => item.week_ending), ['2025-09-14']);
-  assert.deepEqual(priorRows.map((item) => item.month_of_year), [3]);
-  assert.deepEqual(priorRows.map((item) => item.week_ending), ['2025-09-07']);
-});
-
-test('derives Last Quarter as rolling three complete fiscal months before the current month anchor', () => {
-  const definitions = deriveRuntimePeriodDefinitions(sourceRows);
-
-  const currentMonths = definitions
-    .filter((item) => item.period_type === 'Last Quarter' && item.comparison_side === 'current')
-    .map((item) => item.month_of_year);
-  const priorMonths = definitions
-    .filter((item) => item.period_type === 'Last Quarter' && item.comparison_side === 'prior')
-    .map((item) => item.month_of_year);
-
-  assert.deepEqual(currentMonths, [2, 3, 4]);
-  assert.deepEqual(priorMonths, [1, 11, 12]);
-});
-
-test('derives YTD using target week current FY max week minus one for both current and prior FY', () => {
-  const definitions = deriveRuntimePeriodDefinitions(sourceRows);
-
-  const currentWeeks = definitions
-    .filter((item) => item.period_type === 'Year to Date' && item.comparison_side === 'current')
+function weeksFor(definitions, periodType, side) {
+  return definitions
+    .filter((item) => item.period_type === periodType && item.comparison_side === side)
     .map((item) => item.week_of_year);
-  const priorWeeks = definitions
-    .filter((item) => item.period_type === 'Year to Date' && item.comparison_side === 'prior')
-    .map((item) => item.week_of_year);
+}
 
-  assert.deepEqual(currentWeeks, [9, 10, 11]);
-  assert.deepEqual(priorWeeks, [1, 2, 3, 4, 5]);
+function firstFor(definitions, periodType, side = 'current') {
+  return definitions.find((item) => item.period_type === periodType && item.comparison_side === side);
+}
+
+test('derives the six approved active period options in display order', () => {
+  const definitions = deriveRuntimePeriodDefinitions(sourceRows);
+  const periodTypes = Array.from(new Set(definitions.map((item) => item.period_type)));
+
+  assert.deepEqual(periodTypes, [
+    PERIOD_TYPES.lastCompletedWeek,
+    PERIOD_TYPES.lastCompletedMonth,
+    PERIOD_TYPES.lastCompletedQuarter,
+    PERIOD_TYPES.yearToDate,
+    PERIOD_TYPES.quarterToDate,
+    PERIOD_TYPES.monthToDate
+  ]);
 });
 
-test('derived period definitions are runtime rows and do not carry persisted include fields', () => {
+test('fixed comparison mapping is derived from the selected period lens', () => {
+  const definitions = deriveRuntimePeriodDefinitions(sourceRows);
+
+  for (const periodType of [
+    PERIOD_TYPES.lastCompletedWeek,
+    PERIOD_TYPES.lastCompletedMonth,
+    PERIOD_TYPES.lastCompletedQuarter
+  ]) {
+    assert.equal(firstFor(definitions, periodType).comparison_mode, COMPARISON_MODES.previousPeriod);
+  }
+
+  for (const periodType of [
+    PERIOD_TYPES.yearToDate,
+    PERIOD_TYPES.quarterToDate,
+    PERIOD_TYPES.monthToDate
+  ]) {
+    assert.equal(firstFor(definitions, periodType).comparison_mode, COMPARISON_MODES.samePeriodLastYear);
+  }
+});
+
+test('derives Last Completed Week as current FY max week minus one and previous week', () => {
+  const definitions = deriveRuntimePeriodDefinitions(sourceRows);
+  const current = firstFor(definitions, PERIOD_TYPES.lastCompletedWeek, 'current');
+  const prior = firstFor(definitions, PERIOD_TYPES.lastCompletedWeek, 'prior');
+
+  assert.equal(current.period_label_current, 'Last Completed Week');
+  assert.equal(current.period_label_prior, 'Previous Week');
+  assert.equal(current.week_of_year, 39);
+  assert.equal(prior.week_of_year, 38);
+});
+
+test('derives Last Completed Month from FC Last Month Flag and previous fiscal month', () => {
+  const definitions = deriveRuntimePeriodDefinitions(sourceRows);
+
+  assert.deepEqual(weeksFor(definitions, PERIOD_TYPES.lastCompletedMonth, 'current'), [33, 34, 35, 36]);
+  assert.deepEqual(weeksFor(definitions, PERIOD_TYPES.lastCompletedMonth, 'prior'), [29, 30, 31, 32]);
+});
+
+test('derives Last Completed Quarter as two 13-fiscal-week completed periods', () => {
+  const definitions = deriveRuntimePeriodDefinitions(sourceRows);
+
+  assert.deepEqual(weeksFor(definitions, PERIOD_TYPES.lastCompletedQuarter, 'current'), [27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]);
+  assert.deepEqual(weeksFor(definitions, PERIOD_TYPES.lastCompletedQuarter, 'prior'), [14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
+});
+
+test('derives YTD using the same weeks in current and prior fiscal years', () => {
+  const definitions = deriveRuntimePeriodDefinitions(sourceRows);
+
+  assert.deepEqual(weeksFor(definitions, PERIOD_TYPES.yearToDate, 'current'), Array.from({ length: 39 }, (_, index) => index + 1));
+  assert.deepEqual(weeksFor(definitions, PERIOD_TYPES.yearToDate, 'prior'), Array.from({ length: 39 }, (_, index) => index + 1));
+});
+
+test('derives QTD using a 13-week quarter boundary and same period last year', () => {
+  const definitions = deriveRuntimePeriodDefinitions(sourceRows);
+
+  assert.deepEqual(weeksFor(definitions, PERIOD_TYPES.quarterToDate, 'current'), [27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]);
+  assert.deepEqual(weeksFor(definitions, PERIOD_TYPES.quarterToDate, 'prior'), [27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]);
+});
+
+test('derives MTD using current fiscal month-to-date and same month last year', () => {
+  const definitions = deriveRuntimePeriodDefinitions(sourceRows);
+
+  assert.deepEqual(weeksFor(definitions, PERIOD_TYPES.monthToDate, 'current'), [37, 38, 39]);
+  assert.deepEqual(weeksFor(definitions, PERIOD_TYPES.monthToDate, 'prior'), [37, 38, 39]);
+});
+
+test('derived rows preserve compatibility fields and expose runtime comparison concepts', () => {
   const definitions = deriveRuntimePeriodDefinitions(sourceRows);
 
   assert.ok(definitions.length > 0);
   for (const definition of definitions) {
+    assert.equal(definition.period_lens, definition.period_type);
+    assert.equal(definition.fiscal_week, definition.week_of_year);
+    assert.equal(definition.comparable_slot, definition.comparable_week_slot);
+    assert.ok(definition.comparison_window_id);
+    assert.equal(definition.history_offset, 1);
     assert.equal(Object.hasOwn(definition, 'week_include_flag'), false);
     assert.equal(Object.hasOwn(definition, 'week_exclusion_reason'), false);
     assert.equal(Object.hasOwn(definition, 'active_flag'), false);

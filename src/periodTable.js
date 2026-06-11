@@ -1,10 +1,12 @@
 export const PERIOD_PAGE_SIZE = 30;
 
 const PERIOD_ORDER = {
-  'Last Week': 1,
-  'Last Month': 2,
-  'Last Quarter': 3,
-  'Year to Date': 4
+  'Last Completed Week': 1,
+  'Last Completed Month': 2,
+  'Last Completed Quarter': 3,
+  'Year To Date': 4,
+  'Quarter To Date': 5,
+  'Month To Date': 6
 };
 
 const SIDE_ORDER = {
