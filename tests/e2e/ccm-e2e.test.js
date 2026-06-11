@@ -67,7 +67,7 @@ test.describe('CCM Business Requirements — Visual Verification', () => {
     });
   });
 
-  test('03 — Supports multi-store and multi-metric selection UI', async ({ page }) => {
+  test('03 — Supports multi-store, All Metrics, and multi-metric selection UI', async ({ page }) => {
     // Selection controls are in the default mask workspace
     await page.waitForSelector('[data-action="select-store"]', { timeout: 5000 });
 
@@ -76,13 +76,13 @@ test.describe('CCM Business Requirements — Visual Verification', () => {
     const storeOptions = await storeSelect.locator('option').allTextContents();
     expect(storeOptions.some((opt) => opt.includes('All Stores'))).toBe(true);
 
-    // Metric select should be a multi-select
+    // Metric select should be a multi-select with "All Metrics" option
     const metricSelect = page.locator('[data-action="select-metrics"]');
     await expect(metricSelect).toHaveAttribute('multiple');
 
-    // Verify there are metric options
-    const metricOptions = await metricSelect.locator('option').count();
-    expect(metricOptions).toBeGreaterThan(0);
+    const metricOptions = await metricSelect.locator('option').allTextContents();
+    expect(metricOptions.some((opt) => opt.includes('All Metrics'))).toBe(true);
+    expect(metricOptions.length).toBeGreaterThan(1);
 
     await page.screenshot({
       path: path.join(screenshotDir, '03-multi-store-metric-selection.png'),
@@ -286,7 +286,6 @@ test.describe('CCM Business Requirements — Visual Verification', () => {
   test('14 — Guidance labels expose CCM business terminology', async ({ page }) => {
     const pageContent = await page.content();
 
-    // These business terms should appear somewhere in the app
     expect(pageContent).toContain('Comparable Coverage');
     expect(pageContent).toContain('Selected Scope Mask');
     expect(pageContent).toContain('Period Lens');
@@ -296,5 +295,70 @@ test.describe('CCM Business Requirements — Visual Verification', () => {
       path: path.join(screenshotDir, '14-business-terminology.png'),
       fullPage: true
     });
+  });
+
+  test('15 — Period Type is not a required generation selector', async ({ page }) => {
+    // The Period dropdown should be labeled as "Period Filter (review only)"
+    await page.waitForSelector('[data-action="select-period-type"]', { timeout: 5000 });
+    const pageContent = await page.content();
+
+    // Period Type dropdown exists but is labeled as review-only filter
+    expect(pageContent).toContain('Period Filter');
+    // Generation scope text should mention all period types are auto-generated
+    expect(pageContent).toContain('All six approved period types are generated automatically');
+
+    await page.screenshot({
+      path: path.join(screenshotDir, '15-period-type-not-generation-scope.png'),
+      fullPage: true
+    });
+  });
+
+  test('16 — Scope bar shows all period types are generated', async ({ page }) => {
+    await page.waitForSelector('.scope-bar', { timeout: 5000 });
+    const scopeBarText = await page.locator('.scope-bar').textContent();
+
+    // Scope bar should show "All six approved" for period types
+    expect(scopeBarText).toContain('All six approved');
+
+    await page.screenshot({
+      path: path.join(screenshotDir, '16-scope-bar-all-period-types.png'),
+      fullPage: true
+    });
+  });
+
+  test('17 — Override Editor shows guide message when not in single override scope', async ({ page }) => {
+    // With mock data, default is single store + single metric — override editor should show rows
+    await page.waitForSelector('[data-action="select-period-type"]', { timeout: 5000 });
+    const pageContent = await page.content();
+
+    // Verify the override editor is present and mentions the scope requirement
+    expect(pageContent).toContain('Comparable Week Review');
+    expect(pageContent).toContain('Override Editor');
+
+    await page.screenshot({
+      path: path.join(screenshotDir, '17-override-editor-with-data.png'),
+      fullPage: true
+    });
+  });
+
+  test('18 — Diagnostics drawer shows all health indicators', async ({ page }) => {
+    // Open diagnostics drawer
+    await page.click('[data-action="toggle-diagnostics"]');
+    await page.waitForSelector('.diagnostics-drawer.drawer-open', { timeout: 3000 });
+
+    const drawerText = await page.locator('.diagnostics-drawer').textContent();
+
+    // Verify key health indicators are present
+    expect(drawerText).toContain('Source');
+    expect(drawerText).toContain('AppDB');
+    expect(drawerText).toContain('Workflow');
+    expect(drawerText).toContain('L4L');
+
+    await page.screenshot({
+      path: path.join(screenshotDir, '18-diagnostics-verification.png'),
+      fullPage: true
+    });
+
+    await page.click('[data-action="close-diagnostics"]');
   });
 });

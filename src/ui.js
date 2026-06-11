@@ -38,6 +38,7 @@ import { displayText, helperText, labels } from './terminology.js';
 
 const CCM_UI_STATE_STORAGE_KEY = 'forty_winks_ccm_ui_state_v1';
 const ALL_STORES_VALUE = '__ALL_STORES__';
+const ALL_METRICS_VALUE = '__ALL_METRICS__';
 
 export function createApp(root) {
   const persistedUiState = loadPersistedUiState();
@@ -141,7 +142,7 @@ export function createApp(root) {
       state.selectedMetrics = resolveMetrics(sourceResult.profile, state.selectedMetrics, state.selectedMetric);
       state.selectedMetric = state.selectedMetrics[0] || '';
       state.periodRows = periods.rows;
-      state.selectedPeriodType = resolvePeriodType(periods.rows, state.selectedPeriodType);
+      state.selectedPeriodType = state.selectedPeriodType || '';
       state.periodSource = periods.source;
       state.manualOverrides = await loadOverridesForSelection();
       const l4lResult = await loadComparisonRows();
@@ -207,7 +208,7 @@ export function createApp(root) {
           ${healthChip('Source', state.diagnostics?.source?.queryable)}
           ${healthChip('AppDB', state.diagnostics?.appDb?.reachable)}
           ${healthChip('Workflow', getWorkflowTriggerSupport().supported)}
-          <button type="button" class="secondary icon-button" data-action="change-scope">Change Store / Metric / Period</button>
+          <button type="button" class="secondary icon-button" data-action="change-scope">Change Store / Metric</button>
           <button type="button" class="secondary icon-button" data-action="start-new-run">Start New Run</button>
           <button type="button" class="secondary icon-button" data-action="toggle-diagnostics" aria-expanded="${state.diagnosticsOpen ? 'true' : 'false'}">
             Diagnostics
@@ -230,8 +231,8 @@ export function createApp(root) {
           <strong>${escapeHtml(selectedMetricDisplay())}</strong>
         </div>
         <div>
-          <span>${escapeHtml(labels.periodLens)}</span>
-          <strong>${escapeHtml(state.selectedPeriodType || '-')}</strong>
+          <span>Period Types</span>
+          <strong>All six approved</strong>
         </div>
         <div>
           <span>Comparison</span>
@@ -546,18 +547,20 @@ export function createApp(root) {
             <label>
               <span>Metric</span>
               <select data-action="select-metrics" multiple size="4" ${state.loading ? 'disabled' : ''}>
+                <option value="${ALL_METRICS_VALUE}" ${state.selectedMetrics.includes(ALL_METRICS_VALUE) ? 'selected' : ''}>All Metrics</option>
                 ${(profile.metrics || []).map((item) => `<option value="${escapeAttribute(item.metric)}" ${selectedMetricList().includes(item.metric) ? 'selected' : ''}>${escapeHtml(item.metric)}</option>`).join('')}
               </select>
             </label>
             <label>
-              <span>${escapeHtml(labels.periodLens)}</span>
+              <span>Period Filter (review only)</span>
               <select data-action="select-period-type" ${state.loading ? 'disabled' : ''}>
                 ${periodTypes.map((periodType) => `<option value="${escapeAttribute(periodType)}" ${periodType === state.selectedPeriodType ? 'selected' : ''}>${escapeHtml(periodType)}</option>`).join('')}
               </select>
             </label>
           </div>
-          <p class="note">Current selection: ${escapeHtml(selectedStoreDisplay())} / ${escapeHtml(selectedMetricDisplay())} / ${escapeHtml(state.selectedPeriodType || '-')}.</p>
-          <p class="note">Fixed comparison: Last Completed periods compare against Previous Period. YTD, QTD, and MTD compare against Same Period Last Year. Comparison settings are derived from Period Lens.</p>
+          <p class="note">Current selection: ${escapeHtml(selectedStoreDisplay())} / ${escapeHtml(selectedMetricDisplay())}.</p>
+          <p class="note">All six approved period types are generated automatically. Fixed comparison: Last Completed periods compare against Previous Period. YTD, QTD, and MTD compare against Same Period Last Year.</p>
+          <p class="note">The Period Filter above affects only the Comparable Week Review table — it does not limit mask generation scope.</p>
         ` : emptyState('Load source data before selecting a scope.')}
       </section>
     `;
@@ -598,8 +601,33 @@ export function createApp(root) {
   }
 
   function renderPeriodDefinitions() {
-    const visibleRows = selectedPeriodRows();
-    const validation = validatePeriods(visibleRows);
+    if (!singleOverrideScope()) {
+      return `
+        <section class="panel panel-wide">
+          <div class="panel-heading">
+            <div>
+              <h2>Comparable Week Review / Override Editor</h2>
+              ${statusBadge('locked')}
+            </div>
+            <button type="button" class="secondary" data-action="save-overrides" ${state.loading || !scopeSelectionReady() ? 'disabled' : ''}>Save Overrides</button>
+          </div>
+          <p class="note">Fiscal weeks are derived from sourceMetrics at runtime and are not persisted in AppDB. ${escapeHtml(helperText.tradingExpectation)}</p>
+          <p class="note">Manual override editing requires selecting a single Store and a single Metric. With multiple stores or All Metrics selected, Save Overrides will confirm the review without writing new override documents.</p>
+          ${state.reviewConfirmed ? '<p class="success-message">Comparable Week Review confirmed. Build Coverage Mask is now available.</p>' : ''}
+          ${!scopeSelectionReady() ? '<p class="disabled-reason">Select a Store and at least one Metric before reviewing comparable weeks.</p>' : '<p class="note">Select a single Store and a single Metric to enable the override editor.</p>'}
+        </section>
+      `;
+    }
+
+    const allRows = allPeriodRowsForGeneration();
+    const filterRows = state.selectedPeriodType
+      ? allRows.filter((row) => row.period_type === state.selectedPeriodType)
+      : allRows;
+    const validation = validatePeriods(filterRows);
+    const periodTypeFilter = state.selectedPeriodType
+      ? `Filtered to: ${escapeHtml(state.selectedPeriodType)}`
+      : 'Showing all period types';
+
     return `
       <section class="panel panel-wide">
         <div class="panel-heading">
@@ -609,10 +637,9 @@ export function createApp(root) {
           </div>
           <button type="button" class="secondary" data-action="save-overrides" ${state.loading || !scopeSelectionReady() ? 'disabled' : ''}>Save Overrides</button>
         </div>
-        <p class="note">Source: ${escapeHtml(state.periodSource)}. Validation: ${validation.valid ? 'valid' : `${validation.errors.length} error(s)`}. Fiscal weeks are derived from sourceMetrics at runtime and are not persisted in AppDB. ${escapeHtml(helperText.tradingExpectation)}</p>
-        ${singleOverrideScope() ? '' : '<p class="note">Manual override editing is available for one Store and one Metric at a time. This broader scope will use existing active overrides and Save Overrides will confirm the review without writing new override documents.</p>'}
+        <p class="note">Source: ${escapeHtml(state.periodSource)}. Validation: ${validation.valid ? 'valid' : `${validation.errors.length} error(s)`}. Fiscal weeks are derived from sourceMetrics at runtime and are not persisted in AppDB. ${escapeHtml(helperText.tradingExpectation)} ${escapeHtml(periodTypeFilter)}. Use the Period Filter above to narrow the view for easier review.</p>
         ${state.reviewConfirmed ? '<p class="success-message">Comparable Week Review confirmed. Build Coverage Mask is now available.</p>' : '<p class="disabled-reason">Save Overrides to confirm Comparable Week Review before building the selected-scope mask.</p>'}
-        ${visibleRows.length ? renderPeriodTable(visibleRows) : emptyState('No comparable weeks are available for the selected Period Lens.')}
+        ${filterRows.length ? renderPeriodTable(filterRows) : emptyState('No comparable weeks are available.')}
       </section>
     `;
   }
@@ -628,7 +655,7 @@ export function createApp(root) {
         </div>
         <p class="note">${escapeHtml(displayText.selectedScopeOutput)}</p>
         <p class="note">${escapeHtml(displayText.selectedScopeCollection)}</p>
-        <p class="note">${escapeHtml(helperText.selectedScopeMask)}</p>
+        <p class="note">All six approved period types are generated by default for the selected Store and Metric scope. This rebuilds the selected-scope CCM output. It is intended for Phase 1 validation, not production full-mask processing.</p>
         ${step?.disabledReason ? `<p class="disabled-reason">${escapeHtml(step.disabledReason)}</p>` : ''}
         <button type="button" class="primary" data-action="generate-mask" ${isLocked || !state.reviewConfirmed || !state.sourceProfile || !selectedPeriodRows().length || !scopeSelectionReady() ? 'disabled' : ''}>
           Rebuild Selected Scope Mask
@@ -1110,6 +1137,7 @@ export function createApp(root) {
         <button type="button" class="secondary ${state.excludedFilters.week53Only ? 'filter-active' : ''}" data-action="toggle-week53-only">Week 53 only</button>
       </div>
       ${renderReasonGuide()}
+      ${renderCcmLayerBreakdown()}
       ${excludedRows.length ? `
         <div class="table-wrap">
           <table>
@@ -1164,14 +1192,38 @@ export function createApp(root) {
       <details class="reason-guide">
         <summary>Reason guide</summary>
         <dl>
+          <dt>Slot Completeness Rule</dt>
+          <dd>LFL ON includes only comparable slots that exist on all required comparison sides (current AND prior). Unmatched slots are visible in LFL OFF but excluded from LFL ON.</dd>
+          <dt>UNPAIRED_PERIOD_WEEK</dt>
+          <dd>Comparable slot exists on only one comparison side. Caused by unequal week counts (e.g., 4 vs 5 weeks in a month, or quarter mismatches). Excluded from LFL ON.</dd>
           <dt>WEEK_53_EXCLUDED</dt>
-          <dd>Week 53 is excluded from comparable-slot equivalence logic.</dd>
+          <dd>Week 53 excluded from comparable-slot equivalence logic (subtype of the Slot Completeness Rule). Excluded regardless of pairing.</dd>
           <dt>MANUAL_EXCLUDED</dt>
-          <dd>A user-approved manual coverage adjustment excluded this week.</dd>
+          <dd>A user-approved manual coverage adjustment excluded this week. Applies across all period types for the same Store + Metric + Week.</dd>
           <dt>PAIRED_SLOT_EXCLUSION</dt>
-          <dd>Current/prior paired slot was excluded to keep comparison alignment.</dd>
+          <dd>Current/prior paired slot excluded to keep comparison alignment. Scoped within Store + Metric + Period Type + Comparable Slot.</dd>
           <dt>STORE_METRIC_WEEK_PROPAGATED_EXCLUSION</dt>
-          <dd>Same Store + Metric + Week exclusion applied anywhere that week appears.</dd>
+          <dd>Same Store + Metric + Week exclusion applied anywhere that week appears across period types.</dd>
+        </dl>
+      </details>
+    `;
+  }
+
+  function renderCcmLayerBreakdown() {
+    return `
+      <details class="reason-guide layer-breakdown">
+        <summary>CCM Five-Layer Architecture ${renderInfoTooltip(getTooltipCopy('fiveLayerArchitecture'))}</summary>
+        <dl>
+          <dt>L1 — Calendar / Time Truth</dt>
+          <dd>Defines fiscal periods, comparison windows, comparison sides, and comparable slots. Produces: period_type, comparison_side, comparable_week_slot.</dd>
+          <dt>L2 — Trading Expectation / Operational Truth</dt>
+          <dd>Determines whether a store was expected to trade. Flag: system_include_flag. Reason: system_reason_code.</dd>
+          <dt>L3 — Metric Coverage / Data Truth</dt>
+          <dd>Indicates whether metric data exists (transparency layer — missing data is a warning, not a blocking exclusion). Flag: source_data_exists.</dd>
+          <dt>L4 — Comparable Coverage / Comparability Truth</dt>
+          <dd>Combines L1-L3 outputs, manual overrides, slot completeness, and paired propagation into final LFL inclusion. Flag: mask_include_flag. Reason: final_reason_code.</dd>
+          <dt>L5 — Dashboards & Consumption / Presentation</dt>
+          <dd>LFL ON: filter mask_include_flag = Y. LFL OFF: inclusive view, no mask filter.</dd>
         </dl>
       </details>
     `;
@@ -1360,17 +1412,27 @@ export function createApp(root) {
     bindAll('refresh-source', 'click', refreshSource);
     root.querySelector('[data-action="select-store"]')?.addEventListener('change', (event) => updateSelection({ storeCode: event.target.value }));
     root.querySelector('[data-action="select-metrics"]')?.addEventListener('change', (event) => {
-      const metrics = Array.from(event.target.selectedOptions || []).map((option) => option.value).filter(Boolean);
-      updateSelection({ metrics });
+      const selectedValues = Array.from(event.target.selectedOptions || []).map((option) => option.value).filter(Boolean);
+      const allMetricsSelected = selectedValues.includes(ALL_METRICS_VALUE);
+      const hadAllMetrics = state.selectedMetrics.includes(ALL_METRICS_VALUE);
+
+      if (allMetricsSelected && !hadAllMetrics) {
+        updateSelection({ metrics: [ALL_METRICS_VALUE] });
+      } else if (allMetricsSelected && hadAllMetrics && selectedValues.length > 1) {
+        const withoutAll = selectedValues.filter((v) => v !== ALL_METRICS_VALUE);
+        updateSelection({ metrics: withoutAll });
+      } else if (!allMetricsSelected && selectedValues.length === 0 && hadAllMetrics) {
+        updateSelection({ metrics: [ALL_METRICS_VALUE] });
+      } else {
+        updateSelection({ metrics: selectedValues.length ? selectedValues : [ALL_METRICS_VALUE] });
+      }
     });
     root.querySelector('[data-action="select-period-type"]')?.addEventListener('change', (event) => {
-      markScopeChanged();
-      state.reviewConfirmed = false;
       state.selectedPeriodType = event.target.value;
-      state.activeStepId = 'mask';
       state.periodPage = 1;
-      state.pendingWrite = null;
-      state.status = `Selected Period Lens: ${state.selectedPeriodType}.`;
+      state.status = state.selectedPeriodType
+        ? `Period filter set to: ${state.selectedPeriodType}. Override Editor shows only this period type.`
+        : 'Showing all period types in Override Editor.';
       render();
     });
     bindAll('save-overrides', 'click', saveOverrides);
@@ -1462,7 +1524,7 @@ export function createApp(root) {
 
   function changeScope() {
     state.activeStepId = 'mask';
-    state.status = 'Choose a Store, Metric, or Period Lens in the active work area.';
+    state.status = 'Choose a Store and Metric in the active work area. All six period types are generated automatically.';
     render();
   }
 
@@ -1533,11 +1595,12 @@ export function createApp(root) {
     const stores = selectedStores();
     const store = selectedStore();
     const metrics = selectedMetricList();
+    const generationPeriodRows = allPeriodRowsForGeneration();
     const scopeSummary = selectedScopeSummary();
     const maskRows = generateMaskRows({
       stores,
       metrics,
-      periodRows: selectedPeriodRows(),
+      periodRows: generationPeriodRows,
       manualOverrides: state.manualOverrides,
       runId,
       generatedAt,
@@ -1549,19 +1612,19 @@ export function createApp(root) {
       startedAt: generatedAt,
       status: 'pending_confirmation',
       profile: state.sourceProfile,
-      periodRows: selectedPeriodRows(),
+      periodRows: generationPeriodRows,
       maskRows,
       generationMode: 'SELECTED_SCOPE',
       selectedStore: selectedStoreValueForRun(),
       selectedMetric: selectedMetricValueForRun(),
-      selectedPeriodType: state.selectedPeriodType,
+      selectedPeriodType: 'All period types',
       outputCollection: COLLECTIONS.selectedScopeMask,
       rebuildStatus: 'pending_confirmation'
     });
     const summary = buildValidationSummary({
       runId,
       profile: state.sourceProfile,
-      periodRows: selectedPeriodRows(),
+      periodRows: generationPeriodRows,
       maskRows,
       selectedStore: selectedScopeSummaryStore(),
       selectedMetric: singleMetricSelection() ? selectedMetricList()[0] : '',
@@ -1569,7 +1632,7 @@ export function createApp(root) {
       selectedMetricLabel: selectedMetricValueForRun(),
       selectedStoreCodes: selectedStores().map((item) => item.store_code),
       selectedMetrics: selectedMetricList(),
-      selectedPeriodType: state.selectedPeriodType,
+      selectedPeriodType: 'All period types',
       selectedScopeSummary: scopeSummary,
       generationMode: 'SELECTED_SCOPE',
       outputCollection: COLLECTIONS.selectedScopeMask,
@@ -1591,7 +1654,7 @@ export function createApp(root) {
       outputCollection: COLLECTIONS.selectedScopeMask,
       selectedStore: selectedStoreValueForRun(),
       selectedMetric: selectedMetricValueForRun(),
-      selectedPeriodType: state.selectedPeriodType
+      selectedPeriodType: 'All period types'
     };
     state.status = `Review the selected-scope rebuild confirmation for ${runId}.`;
     render();
@@ -1757,7 +1820,7 @@ export function createApp(root) {
   async function saveOverrides() {
     const store = selectedStore();
     if (!scopeSelectionReady()) {
-      state.error = 'Select a Store, at least one Metric, and a Period Lens before saving overrides.';
+      state.error = 'Select a Store and at least one Metric before saving overrides.';
       render();
       return;
     }
@@ -2022,12 +2085,17 @@ export function createApp(root) {
   }
 
   function selectedMetricList() {
-    return (Array.isArray(state.selectedMetrics) && state.selectedMetrics.length)
+    const metrics = (Array.isArray(state.selectedMetrics) && state.selectedMetrics.length)
       ? state.selectedMetrics
       : [state.selectedMetric].filter(Boolean);
+    if (metrics.includes(ALL_METRICS_VALUE)) {
+      return (state.sourceProfile?.metrics || []).map((item) => item.metric).filter(Boolean);
+    }
+    return metrics;
   }
 
   function selectedMetricDisplay() {
+    if (state.selectedMetrics.includes(ALL_METRICS_VALUE)) return 'All Metrics';
     const metrics = selectedMetricList();
     if (!metrics.length) return '-';
     if (metrics.length === 1) return metrics[0];
@@ -2040,7 +2108,7 @@ export function createApp(root) {
   }
 
   function singleMetricSelection() {
-    return selectedMetricList().length === 1;
+    return !state.selectedMetrics.includes(ALL_METRICS_VALUE) && selectedMetricList().length === 1;
   }
 
   function singleOverrideScope() {
@@ -2048,11 +2116,15 @@ export function createApp(root) {
   }
 
   function scopeSelectionReady() {
-    return Boolean(state.selectedStoreCode && selectedMetricList().length && state.selectedPeriodType);
+    return Boolean(state.selectedStoreCode && selectedMetricList().length);
   }
 
   function selectedPeriodRows() {
     return state.periodRows.filter((row) => !state.selectedPeriodType || row.period_type === state.selectedPeriodType);
+  }
+
+  function allPeriodRowsForGeneration() {
+    return state.periodRows;
   }
 
   function selectedScopeSummary() {
@@ -2074,10 +2146,14 @@ export function createApp(root) {
     const store = selectedStore();
     if (!store || !singleMetricSelection()) return [];
 
+    const rows = state.selectedPeriodType
+      ? periodRows.filter((row) => row.period_type === state.selectedPeriodType)
+      : periodRows;
+
     return generateMaskRows({
       stores: [store],
       metrics: selectedMetricList(),
-      periodRows,
+      periodRows: rows,
       manualOverrides: state.manualOverrides,
       runId: 'review',
       generatedAt: ''

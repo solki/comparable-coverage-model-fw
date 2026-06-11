@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Forty Winks CCM is a Domo custom app (Phase 1 prototype, v1.0.7) that generates Comparable Coverage Model weekly mask data for selected Store + Metric + Period Lens scopes. The app reads source metrics, derives comparable fiscal weeks at runtime, applies manual overrides, generates mask rows, and writes output to Domo AppDB collections. Phase 2 adds L4L comparison visualization consuming a pre-built Workflow output dataset.
+Forty Winks CCM is a Domo custom app (Phase 1 prototype, v1.0.7) that generates Comparable Coverage Model weekly mask data for selected Store + Metric scope across all six approved period types. The app reads source metrics, derives comparable fiscal weeks at runtime, applies manual overrides, generates mask rows (long-table format with `period_type` as a field), and writes output to Domo AppDB collections. Phase 2 adds L4L comparison visualization consuming a pre-built Workflow output dataset.
 
 - **Type**: Domo custom app (fullpage, vanilla JS)
 - **Build**: Vite (`npm run build`) with a post-build Domo asset copy script
@@ -93,6 +93,29 @@ The output grain is `period_type + comparison_side + comparable_week_slot + stor
 3. Write run record to `ccm_generation_runs`
 4. If clear fails, insert is skipped. If insert fails after clear, error is logged to `ccm_generation_runs`.
 
+### CCM Five-Layer Architecture
+
+The system follows a five-layer model (defined in `CCM_LAYERS` in [src/constants.js](src/constants.js)):
+
+| Layer | Name | Flag Field | Reason Field | Module |
+|---|---|---|---|---|
+| L1 | Calendar / Time Truth | — | — | [src/periodDefinition.js](src/periodDefinition.js) |
+| L2 | Trading Expectation / Operational Truth | `system_include_flag` | `system_reason_code` | [src/l4lEligibility.js](src/l4lEligibility.js) |
+| L3 | Metric Coverage / Data Truth | `source_data_exists` | — | [src/scopeSummary.js](src/scopeSummary.js) (transparency only, not blocking) |
+| L4 | Comparable Coverage / Comparability Truth | `mask_include_flag` | `final_reason_code` | [src/maskGenerator.js](src/maskGenerator.js) |
+| L5 | Dashboards & Consumption / Presentation | — | — | [src/ui.js](src/ui.js), [src/l4lComparisonCalculator.js](src/l4lComparisonCalculator.js) |
+
+**L4 (Comparable Coverage)** applies the following pipeline:
+1. System eligibility (L2 Trading Expectation)
+2. Manual override application (Store + Metric + Week Ending)
+3. Store+Metric+Week propagation
+4. Paired slot propagation (within same period type)
+5. **Slot Completeness Rule** — any comparable slot not on all required comparison sides (current AND prior) is excluded from LFL ON. Week 53 is a subtype (gets WEEK_53_EXCLUDED). All other unmatched slots get UNPAIRED_PERIOD_WEEK.
+
+**L5 (Presentation)** semantics:
+- LFL ON: filter `mask_include_flag = Y`
+- LFL OFF: inclusive view, no mask filter
+
 ### Phase 2 — L4L Comparison Visualization
 
 Phase 2 is read-only visualization of a pre-built Workflow output:
@@ -116,7 +139,29 @@ Steps unlock sequentially: mask completion → workflow ready → results access
 - **[src/constants.js](src/constants.js)** — All app constants: collection names, flags, reason codes, period types, comparison modes, source required fields, period labels
 - **[src/dateUtils.js](src/dateUtils.js)** — Date normalization, min/max, add/subtract days, clean string utilities used throughout
 - **[src/validation.js](src/validation.js)** — `buildValidationSummary()` computes selected-scope business + technical validation from mask rows
-- **[src/scopeSummary.js](src/scopeSummary.js)** — `computeGlobalDatasetOverview()` and `computeSelectedScopeSummary()` — global is unfiltered, selected-scope is filtered to current Store + Metric + Period Lens
+- **[src/scopeSummary.js](src/scopeSummary.js)** — `computeGlobalDatasetOverview()` and `computeSelectedScopeSummary()` — global is unfiltered, selected-scope is filtered to current Store + Metric scope
+
+### Generation Scope
+
+The user selects:
+- **Store**: one store, multiple stores, or All Stores
+- **Metric**: one metric, multiple metrics, or All Metrics
+
+**Period Type is NOT a generation scope selector.** All six approved period types are generated automatically by default. The Period Filter dropdown in the Selection panel affects only the Comparable Week Review / Override Editor table view — it does not limit mask generation.
+
+### Long-Table CCM Model
+
+The AppDB `ccm_selected_scope_mask` output uses a long-table structure. Each row is distinguished by:
+`store_code + metric + period_type + comparison_side + comparable_week_slot + week_ending`
+
+Key fields per row: `period_type`, `comparison_side`, `comparable_week_slot`, `mask_include_flag`, `final_reason_code`. There is no wide-table pivoting in the app — period-specific field groups (lcw_*, lcm_*, etc.) are documented as a future ETL handoff in [PRODUCTION_CCM_HANDOFF.md](PRODUCTION_CCM_HANDOFF.md).
+
+### Override Editor Scope
+
+- Override Editor requires selecting a **single Store** and a **single Metric** to enable editing.
+- After Store + Metric selection, it shows comparable week records for ALL period types (grouped/filterable by the optional Period Type dropdown).
+- Manual overrides persist at grain `store_code + metric + week_ending` and apply across all period types.
+- Paired propagation operates at grain `store_code + metric + period_type + comparable_week_slot` and does NOT cross period types.
 - **[src/terminology.js](src/terminology.js)** — UI display text and helper text constants
 - **[src/metricDisplay.js](src/metricDisplay.js)** — Metric display name formatting for multi-metric selection
 - **[src/maskLimit.js](src/maskLimit.js)** — Guard for mask row count limits
