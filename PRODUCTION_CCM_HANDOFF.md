@@ -116,6 +116,48 @@ For a selected period:
 
 Reason fields should be available for explainability tables and exclusion drilldowns.
 
+## AppDB Schema Gap Analysis (Phase 3 — 2026-06)
+
+### Current `ccm_selected_scope_mask` fields (33 fields)
+`id, run_id, active_flag, generated_at, generation_mode, output_collection, inclusion_key, period_type, period_label_current, period_label_prior, comparison_side, comparable_week_slot, store_code, store_name, region, metric, week_ending, week_of_year, month_of_year, financial_year, system_include_flag, manual_include_flag, effective_include_flag, paired_slot_include_flag, final_include_flag, mask_include_flag, is_manual_override, manual_reason, system_reason_code, final_reason_code, store_trading_commencement_date, store_closure_date, current_period_start_date, current_period_end_date, source, version`
+
+### Fields Needed for Five-Layer Model
+
+| Layer | New Field | Type | Exists Under Different Name? |
+|---|---|---|---|
+| L1 Calendar | `calendar_include_flag` | STRING | ❌ New |
+| L1 Calendar | `calendar_reason_code` | STRING | ❌ New |
+| L1 Calendar | `comparison_mode` | STRING | ❌ (exists in periodDeifinition only) |
+| L1 Calendar | `comparison_window_id` | STRING | ❌ (exists in periodDeifinition only) |
+| L2 Trading | `trading_include_flag` | STRING | ✅ `system_include_flag` |
+| L2 Trading | `trading_reason_code` | STRING | ✅ `system_reason_code` |
+| L3 Metric | `metric_coverage_flag` | STRING | ❌ New |
+| L3 Metric | `metric_coverage_status` | STRING | ❌ New |
+| L3 Metric | `metric_coverage_reason_code` | STRING | ❌ New |
+| L3 Metric | `source_value` | LONG | ❌ New (exists in review context only) |
+| L3 Metric | `source_row_count` | LONG | ❌ New (exists in review context only) |
+| L3 Metric | `source_data_exists` | STRING | ❌ New |
+| L4 CCM | `paired_slot_reason_code` | STRING | ❌ New |
+| L4 CCM | `comparable_slot` | LONG | ✅ `comparable_week_slot` |
+
+### Manual AppDB Schema Changes Required
+
+6 truly new fields must be added to `ccm_selected_scope_mask`:
+1. `calendar_include_flag` (STRING)
+2. `calendar_reason_code` (STRING)
+3. `metric_coverage_flag` (STRING)
+4. `metric_coverage_status` (STRING)
+5. `metric_coverage_reason_code` (STRING)
+6. `paired_slot_reason_code` (STRING)
+
+These must be added via Domo AppDB UI or DA CLI. The app code currently derives
+these values in the review table and layer output panels but does NOT persist them.
+
+Also consider adding to `ccm_full_mask` for production use.
+
+**Current mitigation**: The app derives five-layer values in-memory for UI display.
+See `renderLayerOutputSummary()` and `layerOutputValues()` in src/ui.js.
+
 ## Not Implemented In This Repo
 
 The following remain manual / future Domo-side work:
@@ -125,5 +167,5 @@ The following remain manual / future Domo-side work:
 - Magic ETL / DataFlow changes.
 - Production dataset creation or replacement.
 - Dataset alias or card mapping updates in Domo.
-- AppDB schema changes for additional persisted fields.
+- **AppDB schema changes for the 6 five-layer fields listed above.**
 - Any mutation of the read-only `sourceMetrics` dataset.
