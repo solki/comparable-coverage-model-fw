@@ -57,7 +57,7 @@ export function createApp(root) {
     selectedStoreCode: persistedUiState.selectedStoreCode || '',
     selectedMetric: persistedUiState.selectedMetric || '',
     selectedMetrics: Array.isArray(persistedUiState.selectedMetrics) ? persistedUiState.selectedMetrics : [],
-    selectedPeriodType: persistedUiState.selectedPeriodType || '',
+    reviewPeriodTypeFilter: persistedUiState.reviewPeriodTypeFilter || '',
     manualOverrides: [],
     diagnostics: {
       source: {
@@ -151,7 +151,7 @@ export function createApp(root) {
       state.selectedMetrics = resolveMetrics(sourceResult.profile, state.selectedMetrics, state.selectedMetric);
       state.selectedMetric = state.selectedMetrics[0] || '';
       state.periodRows = periods.rows;
-      state.selectedPeriodType = state.selectedPeriodType || '';
+      state.reviewPeriodTypeFilter = state.reviewPeriodTypeFilter || '';
       state.periodSource = periods.source;
       state.manualOverrides = await loadOverridesForSelection();
       const l4lResult = await loadComparisonRows();
@@ -783,12 +783,12 @@ export function createApp(root) {
     }
 
     const allRows = allPeriodRowsForGeneration();
-    const filterRows = state.selectedPeriodType
-      ? allRows.filter((row) => row.period_type === state.selectedPeriodType)
+    const filterRows = state.reviewPeriodTypeFilter
+      ? allRows.filter((row) => row.period_type === state.reviewPeriodTypeFilter)
       : allRows;
     const validation = validatePeriods(filterRows);
-    const periodTypeFilter = state.selectedPeriodType
-      ? `Filtered to: ${escapeHtml(state.selectedPeriodType)}`
+    const periodTypeFilter = state.reviewPeriodTypeFilter
+      ? `Filtered to: ${escapeHtml(state.reviewPeriodTypeFilter)}`
       : 'Showing all period types';
 
     return `
@@ -1594,10 +1594,10 @@ export function createApp(root) {
       }
     });
     root.querySelector('[data-action="select-period-type"]')?.addEventListener('change', (event) => {
-      state.selectedPeriodType = event.target.value;
+      state.reviewPeriodTypeFilter = event.target.value;
       state.periodPage = 1;
-      state.status = state.selectedPeriodType
-        ? `Period filter set to: ${state.selectedPeriodType}. Override Editor shows only this period type.`
+      state.status = state.reviewPeriodTypeFilter
+        ? `Period filter set to: ${state.reviewPeriodTypeFilter}. Override Editor shows only this period type.`
         : 'Showing all period types in Override Editor.';
       render();
     });
@@ -1760,7 +1760,7 @@ export function createApp(root) {
       if (!state.selectedStoreCode) state.selectedStoreCode = sourceResult.profile?.stores?.[0]?.store_code || '';
       state.selectedMetrics = resolveMetrics(sourceResult.profile, state.selectedMetrics, state.selectedMetric);
       state.selectedMetric = state.selectedMetrics[0] || '';
-      if (!state.selectedPeriodType) state.selectedPeriodType = periods.rows[0]?.period_type || '';
+      if (!state.reviewPeriodTypeFilter) state.reviewPeriodTypeFilter = periods.rows[0]?.period_type || '';
       state.manualOverrides = await loadOverridesForSelection();
       state.diagnostics = mergeDiagnostics(state.diagnostics, sourceResult.diagnostics);
       state.status = 'Source profile refreshed.';
@@ -1807,7 +1807,7 @@ export function createApp(root) {
       generationMode: 'SELECTED_SCOPE',
       selectedStore: selectedStoreValueForRun(),
       selectedMetric: selectedMetricValueForRun(),
-      selectedPeriodType: 'All period types',
+      reviewPeriodTypeFilter: 'All period types',
       outputCollection: COLLECTIONS.selectedScopeMask,
       rebuildStatus: 'pending_confirmation'
     });
@@ -1822,7 +1822,7 @@ export function createApp(root) {
       selectedMetricLabel: selectedMetricValueForRun(),
       selectedStoreCodes: selectedStores().map((item) => item.store_code),
       selectedMetrics: selectedMetricList(),
-      selectedPeriodType: 'All period types',
+      reviewPeriodTypeFilter: 'All period types',
       selectedScopeSummary: scopeSummary,
       generationMode: 'SELECTED_SCOPE',
       outputCollection: COLLECTIONS.selectedScopeMask,
@@ -1844,7 +1844,7 @@ export function createApp(root) {
       outputCollection: COLLECTIONS.selectedScopeMask,
       selectedStore: selectedStoreValueForRun(),
       selectedMetric: selectedMetricValueForRun(),
-      selectedPeriodType: 'All period types'
+      reviewPeriodTypeFilter: 'All period types'
     };
     state.status = `Review the selected-scope rebuild confirmation for ${runId}.`;
     render();
@@ -2334,7 +2334,7 @@ export function createApp(root) {
   }
 
   function selectedPeriodRows() {
-    return state.periodRows.filter((row) => !state.selectedPeriodType || row.period_type === state.selectedPeriodType);
+    return state.periodRows.filter((row) => !state.reviewPeriodTypeFilter || row.period_type === state.reviewPeriodTypeFilter);
   }
 
   function allPeriodRowsForGeneration() {
@@ -2349,7 +2349,7 @@ export function createApp(root) {
     return [
       state.selectedStoreCode,
       selectedMetricList().join(','),
-      state.selectedPeriodType || '',
+      state.reviewPeriodTypeFilter || '',
       state.reviewConfirmed ? '1' : '0',
       state.manualOverrides.length,
       state.periodRows.length
@@ -2374,7 +2374,7 @@ export function createApp(root) {
       selectedStores: selectedStores(),
       selectedMetric: singleMetricSelection() ? selectedMetricList()[0] : '',
       selectedMetrics: selectedMetricList(),
-      selectedPeriodType: state.selectedPeriodType,
+      reviewPeriodTypeFilter: state.reviewPeriodTypeFilter,
       periodRows: state.periodRows,
       manualOverrides: state.manualOverrides,
       maskRows: _cachedReviewRows
@@ -2397,8 +2397,8 @@ export function createApp(root) {
     const store = selectedStore();
     if (!store || !singleMetricSelection()) return [];
 
-    const rows = state.selectedPeriodType
-      ? periodRows.filter((row) => row.period_type === state.selectedPeriodType)
+    const rows = state.reviewPeriodTypeFilter
+      ? periodRows.filter((row) => row.period_type === state.reviewPeriodTypeFilter)
       : periodRows;
 
     return generateMaskRows({
@@ -2554,7 +2554,7 @@ function persistUiState(state) {
       selectedStoreCode: state.selectedStoreCode,
       selectedMetric: state.selectedMetric,
       selectedMetrics: selectedMetricList(),
-      selectedPeriodType: state.selectedPeriodType,
+      reviewPeriodTypeFilter: state.reviewPeriodTypeFilter,
       periodPage: state.periodPage,
       reviewConfirmed: state.reviewConfirmed,
       comparisonRefreshPending: state.comparisonRefreshPending,
@@ -2772,7 +2772,7 @@ function renderWriteConfirmation(pendingWrite) {
           ${metric(labels.outputCollection, pendingWrite.outputCollection || COLLECTIONS.selectedScopeMask)}
           ${metric(labels.selectedStore, pendingWrite.selectedStore || '-')}
           ${metric(labels.selectedMetric, pendingWrite.selectedMetric || '-')}
-          ${metric(labels.selectedPeriodLens, pendingWrite.selectedPeriodType || '-')}
+          ${metric(labels.selectedPeriodLens, pendingWrite.reviewPeriodTypeFilter || '-')}
           ${metric(labels.runId, pendingWrite.runId)}
           ${metric(labels.comparableWeekRecordsToWrite, pendingWrite.maskRowCount)}
         </div>
