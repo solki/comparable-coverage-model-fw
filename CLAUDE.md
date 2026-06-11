@@ -124,15 +124,23 @@ Phase 2 is read-only visualization of a pre-built Workflow output:
 - **[src/workflowService.js](src/workflowService.js)** triggers the `prepareL4LFacts` Workflow and polls for completion
 - The app does not modify the Workflow, Magic ETL, DataFlow, or source dataset
 
-### UI Workflow State Machine
+### Five-Layer UI Navigator
 
-**[src/workflowUiState.js](src/workflowUiState.js)** defines a 4-step guided workflow with gating:
-1. **mask** — Build selected-scope coverage mask
-2. **workflow** — Run Prepare L4L Comparison Facts
-3. **results** — Review L4L ON vs OFF comparison
-4. **exclusions** — Review excluded weeks evidence
+**[src/workflowUiState.js](src/workflowUiState.js)** implements a 5-stage layer navigator that maps to the CCM five-layer architecture:
 
-Steps unlock sequentially: mask completion → workflow ready → results accessible. Each step transitions through `locked` → `ready` → `completed_unacknowledged` → `complete`. The `stepAcknowledged` pattern requires explicit user confirmation before the next step unlocks.
+1. **calendar** — Calendar Layer / Time Truth
+2. **trading** — Trading Expectation / Operational Truth
+3. **metricCoverage** — Metric Coverage / Data Truth
+4. **comparableCoverage** — Comparable Coverage / Comparability Truth
+5. **presentation** — Dashboards & Consumption / Presentation
+
+Each stage displays its guiding question, layer-specific accent color, and status (locked → ready → complete). Stages 1-3 unlock automatically when source data loads. Stage 4 unlocks when Store+Metric scope is selected and review is confirmed. Stage 5 unlocks when the mask is built and acknowledged.
+
+The layer navigator is rendered by `renderLayerNavigator()` in [src/ui.js](src/ui.js) as a horizontal card strip. Each stage's workspace shows layer-specific content: Calendar shows global overview + scope selection, Trading shows store eligibility, Metric shows data coverage, CCM shows override editor and mask generation, Presentation shows L4L results.
+
+**Stage progression** is strictly linear: each stage must be explicitly confirmed via its "Confirm → Next Stage" button. Re-confirming a completed stage resets all downstream stages. The "Rebuild Selected Scope Mask" button appears directly in the scope-change banner when scope is dirty.
+
+**Diagnostics** opens as a modal popup (not a bottom drawer). Click the backdrop or Close button to dismiss.
 
 ### Key Supporting Modules
 

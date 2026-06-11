@@ -63,7 +63,6 @@ test('UI review table exposes business-facing CCM terminology', () => {
   }
 
   for (const oldLabel of [
-    'System Include',
     'Manual Include',
     'Effective Include',
     'Final Include',

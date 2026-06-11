@@ -24,10 +24,12 @@ import {
 } from './workflowService.js';
 import {
   buildExecutionModal,
-  getActiveWorkflowStepId,
+  getActiveLayerStageId,
   getCoverageModeLabel,
+  getLayerConfig,
+  getLayerStages,
   getTooltipCopy,
-  getWorkflowSteps
+  LAYER_STAGE_IDS
 } from './workflowUiState.js';
 import {
   computeGlobalDatasetOverview,
@@ -86,7 +88,14 @@ export function createApp(root) {
     l4lComparableCoverageOn: persistedUiState.l4lComparableCoverageOn ?? true,
     l4lMessage: persistedUiState.l4lMessage || 'No L4L comparison data is available. Run the Prepare L4L Comparison Facts Workflow first.',
     workflowProgress: null,
-    activeStepId: persistedUiState.activeStepId || '',
+    activeLayerId: persistedUiState.activeLayerId || '',
+    stageConfirmed: {
+      calendar: Boolean(persistedUiState.stageConfirmed?.calendar),
+      trading: Boolean(persistedUiState.stageConfirmed?.trading),
+      metricCoverage: Boolean(persistedUiState.stageConfirmed?.metricCoverage),
+      comparableCoverage: Boolean(persistedUiState.stageConfirmed?.comparableCoverage),
+      presentation: Boolean(persistedUiState.stageConfirmed?.presentation)
+    },
     diagnosticsOpen: Boolean(persistedUiState.diagnosticsOpen),
     activeEvidenceTab: persistedUiState.activeEvidenceTab || 'excluded',
     excludedFilters: {
@@ -151,7 +160,7 @@ export function createApp(root) {
       if (recoveredAfterDomoRefresh) {
         state.comparisonRefreshPending = false;
         state.stepAcknowledged.workflow = true;
-        state.activeStepId = 'results';
+        state.activeLayerId = LAYER_STAGE_IDS.presentation;
       }
       state.diagnostics = mergeDiagnostics(
         state.diagnostics,
@@ -181,8 +190,8 @@ export function createApp(root) {
         <section class="banner" aria-live="polite">${escapeHtml(state.status)}</section>
         ${renderStaleDataBanner()}
         ${renderNextActionStrip()}
-        ${renderWorkflowRail()}
-        ${renderActiveStepWorkspace()}
+        ${renderLayerNavigator()}
+        ${renderActiveLayerWorkspace()}
         ${renderEvidenceTabs()}
         ${renderDiagnosticsDrawer()}
         ${state.pendingWrite ? renderWriteConfirmation(state.pendingWrite) : ''}
@@ -231,8 +240,8 @@ export function createApp(root) {
           <strong>${escapeHtml(selectedMetricDisplay())}</strong>
         </div>
         <div>
-          <span>Period Types</span>
-          <strong>All six approved</strong>
+          <span>Period Types (all 6 auto-generated)</span>
+          <strong>LCW · LCM · LCQ · YTD · QTD · MTD</strong>
         </div>
         <div>
           <span>Comparison</span>
@@ -252,8 +261,11 @@ export function createApp(root) {
     if (!state.scopeDirty) return '';
     return `
       <section class="stale-data-banner" role="status" aria-live="polite">
-        <strong>Scope changed.</strong>
-        Existing mask and L4L result context may no longer match the selected scope. Rebuild the selected-scope mask before running the Workflow.
+        <div>
+          <strong>Scope changed.</strong>
+          Existing mask and L4L result context no longer match the current scope. Rebuild the mask below.
+        </div>
+        <button type="button" class="primary compact" data-action="generate-mask">Rebuild Selected Scope Mask</button>
       </section>
     `;
   }
@@ -276,228 +288,365 @@ export function createApp(root) {
     `;
   }
 
-  function renderWorkflowRail() {
+  function renderLayerNavigator() {
     return `
-      <nav class="workflow-rail" aria-label="CCM workflow">
-        ${workflowSteps().map((step) => `
+      <nav class="layer-navigator" aria-label="CCM five-layer architecture">
+        ${layerStages().map((stage) => `
           <button
-            class="workflow-rail-step workflow-step workflow-step-${escapeAttribute(step.status)}"
+            class="layer-card layer-card-${escapeAttribute(stage.id)} layer-status-${escapeAttribute(stage.status)}"
             type="button"
-            data-action="open-workflow-step"
-            data-step-id="${escapeAttribute(step.id)}"
-            ${step.status === 'locked' ? 'disabled' : ''}
-            title="${escapeAttribute(step.disabledReason || step.help)}"
+            data-action="open-layer-stage"
+            data-layer-id="${escapeAttribute(stage.id)}"
+            title="${escapeAttribute(stage.question)}"
+            style="--layer-color: ${escapeAttribute(stage.color)}; --layer-border: ${escapeAttribute(stage.borderColor)}; --layer-bg: ${escapeAttribute(stage.bgColor)}"
           >
-            <span class="step-index">${escapeHtml(stepStatusIcon(step.status, step.number))}</span>
-            <span class="step-copy">
-              <strong>${escapeHtml(step.title)} ${renderInfoTooltip(step.help)}</strong>
-              <small>${escapeHtml(step.layer)}</small>
-              ${step.disabledReason && step.status === 'locked' ? `<em>${escapeHtml(step.disabledReason)}</em>` : ''}
+            <span class="layer-icon" style="background: ${escapeAttribute(stage.color)}">${escapeHtml(stage.icon)}</span>
+            <span class="layer-copy">
+              <span class="layer-num">Stage ${escapeHtml(stage.num)}</span>
+              <strong>${escapeHtml(stage.title)}</strong>
+              <small>${escapeHtml(stage.subtitle)}</small>
+              <em class="layer-question">${escapeHtml(stage.question)}</em>
             </span>
+            <span class="layer-status-badge status-${escapeAttribute(stage.status)}">${escapeHtml(layerStatusLabel(stage.status))}</span>
           </button>
         `).join('')}
       </nav>
     `;
   }
 
-  function renderWorkflowStepper() {
-    return renderWorkflowRail();
-  }
+  function renderWorkflowRail() { return renderLayerNavigator(); }
+  function renderWorkflowStepper() { return renderLayerNavigator(); }
 
-  function renderActiveStepWorkspace() {
-    const step = activeWorkflowStep();
+  function renderActiveLayerWorkspace() {
+    const stage = activeLayerStage();
+    const config = getLayerConfig(stage.id);
     return `
-      <section class="active-step-workspace active-step-${escapeAttribute(step.id)}">
-        <div class="workspace-heading">
-          <div>
-            <p class="eyebrow">Active Work Area</p>
-            <h2>${escapeHtml(step.number)}. ${escapeHtml(step.title)} ${renderInfoTooltip(step.help)}</h2>
-            <p class="note">${escapeHtml(guidedStepDescription(step.id))}</p>
-            ${step.disabledReason && step.status === 'locked' ? `<p class="disabled-reason">${escapeHtml(step.disabledReason)}</p>` : ''}
+      <section class="layer-workspace layer-workspace-${escapeAttribute(stage.id)}">
+        <div class="workspace-heading layer-heading" style="--layer-color: ${escapeAttribute(config.color)}; --layer-border: ${escapeAttribute(config.borderColor)}; --layer-bg: ${escapeAttribute(config.bgColor)}">
+          <div class="layer-heading-left">
+            <span class="layer-icon-large" style="background: ${escapeAttribute(config.color)}">${escapeHtml(config.icon)}</span>
+            <div>
+              <p class="eyebrow">Stage ${escapeHtml(config.num)} · ${escapeHtml(config.subtitle)}</p>
+              <h2>${escapeHtml(config.title)}</h2>
+              <p class="layer-question-main">${escapeHtml(config.question)}</p>
+              <p class="note">${escapeHtml(config.oneLiner)}</p>
+            </div>
           </div>
-          ${statusBadge(step.status)}
+          ${statusBadge(stage.status)}
         </div>
         <div class="workspace-grid">
-          ${renderRunCompletionPanel()}
-          ${renderActiveStepBody(step)}
+          ${renderActiveLayerBody(stage)}
         </div>
       </section>
     `;
   }
 
-  function renderActiveStepBody(step) {
-    if (step.id === 'workflow') {
-      return `${renderPrepareL4LWorkflowPanel()}${renderValidationSummary()}`;
+  function renderActiveLayerBody(stage) {
+    const id = stage.id;
+    if (id === LAYER_STAGE_IDS.calendar) {
+      return `${renderSelectionControls()}${renderGlobalDatasetOverview()}${renderLayerOutputSummary(id)}${renderStageConfirmButton(id)}`;
     }
-    if (step.id === 'results') {
-      return `${renderL4LComparisonVisualization()}${renderPrepareL4LWorkflowPanel()}`;
+    if (id === LAYER_STAGE_IDS.trading) {
+      return `${renderSelectedScopeSummary()}${renderTradingExpectationPanel()}${renderLayerOutputSummary(id)}${renderStageConfirmButton(id)}`;
     }
-    if (step.id === 'exclusions') {
-      return state.l4lRows.length ? renderL4LComparisonVisualization() : renderPrepareL4LWorkflowPanel();
+    if (id === LAYER_STAGE_IDS.metricCoverage) {
+      return `${renderSelectedScopeSummary()}${renderMetricCoveragePanel()}${renderLayerOutputSummary(id)}${renderStageConfirmButton(id)}`;
     }
-    return `${renderSelectionControls()}${renderSelectedScopeSummary()}${renderGenerateMask()}${renderPeriodDefinitions()}${renderValidationSummary()}`;
+    if (id === LAYER_STAGE_IDS.comparableCoverage) {
+      return `${renderSelectedScopeSummary()}${renderPeriodDefinitions()}${renderGenerateMask()}${renderValidationSummary()}${renderStageConfirmButton(id)}`;
+    }
+    // presentation
+    return `${renderL4LComparisonVisualization()}${renderPrepareL4LWorkflowPanel()}${renderEvidenceTabs()}`;
   }
 
-  function renderRunCompletionPanel() {
-    if (!state.l4lRows.length) return '';
+  function renderStageConfirmButton(stageId) {
+    const stage = layerStages().find((s) => s.id === stageId);
+    if (!stage) return '';
+    // Show button if stage is NOT complete, OR if user is actively viewing this completed stage
+    const isViewing = activeLayerStage().id === stageId;
+    if (stage.status === 'complete' && !isViewing) return '';
+
+    const btnStyle = isViewing && (stage.status === 'ready' || stage.status === 'complete') ? 'primary' : 'secondary';
+
+    const labels = {
+      [LAYER_STAGE_IDS.calendar]: 'Confirm Calendar → Trading Expectation',
+      [LAYER_STAGE_IDS.trading]: 'Confirm Trading → Metric Coverage',
+      [LAYER_STAGE_IDS.metricCoverage]: 'Confirm Coverage → Comparable Coverage',
+      [LAYER_STAGE_IDS.comparableCoverage]: 'Complete & Unlock Presentation'
+    };
+    const label = labels[stageId] || 'Confirm & Continue';
+    const disabled = !isViewing || stage.status === 'locked' ? 'disabled' : '';
 
     return `
-      <section class="panel panel-wide run-complete-panel" aria-label="Run Complete">
+      <section class="panel stage-confirm-panel">
         <div class="panel-heading">
-          <div>
-            <p class="eyebrow">Run Complete</p>
-            <h2>Ready for review or another run</h2>
-            <p class="note">The current L4L comparison facts are loaded. Review results and evidence, or start a new run to choose another Store, Metric, or Period Lens.</p>
-          </div>
-          ${statusBadge('complete')}
+          <h3>Proceed to Next Stage</h3>
+          ${statusBadge(stage.status)}
         </div>
-        <div class="button-row">
-          <button type="button" class="primary compact" data-action="start-new-run">Start New Run</button>
-          <button type="button" class="secondary" data-action="change-scope">Change Store / Metric / Period</button>
-          <button type="button" class="secondary" data-action="open-workflow-step" data-step-id="exclusions">Review Excluded Weeks</button>
-        </div>
+        <p class="note">${stage.status === 'locked' ? 'Complete the current stage requirements first.' : 'Confirm this stage is complete to unlock the next one.'}</p>
+        <button type="button" class="${btnStyle}" data-action="confirm-stage" data-stage-id="${escapeAttribute(stageId)}" ${disabled}>${escapeHtml(label)}</button>
       </section>
     `;
   }
 
-  function renderGuidedStep() {
-    const step = activeWorkflowStep();
-    const nextCopy = nextStepCopy(step);
+  function handleConfirmStage(stageId) {
+    if (stageId === LAYER_STAGE_IDS.calendar) {
+      state.stageConfirmed.calendar = true;
+      // Reset downstream stages when scope may have changed
+      state.stageConfirmed.trading = false;
+      state.stageConfirmed.metricCoverage = false;
+      state.stageConfirmed.comparableCoverage = false;
+      state.stageConfirmed.presentation = false;
+      state.activeLayerId = LAYER_STAGE_IDS.trading;
+      state.status = 'Calendar layer confirmed. Proceeding to Trading Expectation.';
+    } else if (stageId === LAYER_STAGE_IDS.trading) {
+      state.stageConfirmed.trading = true;
+      state.stageConfirmed.metricCoverage = false;
+      state.stageConfirmed.comparableCoverage = false;
+      state.stageConfirmed.presentation = false;
+      state.activeLayerId = LAYER_STAGE_IDS.metricCoverage;
+      state.status = 'Trading expectations confirmed. Proceeding to Metric Coverage.';
+    } else if (stageId === LAYER_STAGE_IDS.metricCoverage) {
+      state.stageConfirmed.metricCoverage = true;
+      state.stageConfirmed.comparableCoverage = false;
+      state.stageConfirmed.presentation = false;
+      state.activeLayerId = LAYER_STAGE_IDS.comparableCoverage;
+      state.status = 'Metric coverage confirmed. Proceeding to Comparable Coverage.';
+    } else if (stageId === LAYER_STAGE_IDS.comparableCoverage) {
+      state.stageConfirmed.comparableCoverage = true;
+      state.stageConfirmed.presentation = false;
+      state.activeLayerId = LAYER_STAGE_IDS.presentation;
+      state.status = 'CCM mask complete. Proceeding to Presentation.';
+    }
+    invalidateScopeCache();
+    render();
+  }
+
+  function renderLayerOutputSummary(layerId) {
+    const config = getLayerConfig(layerId);
+    const stage = layerStages().find((s) => s.id === layerId);
+    const values = layerOutputValues(layerId);
     return `
-      <section class="guided-step guided-step-${escapeAttribute(step.status)}">
-        <div>
-          <p class="eyebrow">Guided workflow</p>
-          <h2>${escapeHtml(step.number)}. ${escapeHtml(step.title)} ${renderInfoTooltip(step.help)}</h2>
-          <p class="note">${escapeHtml(guidedStepDescription(step.id))}</p>
-          ${step.disabledReason && step.status === 'locked' ? `<p class="disabled-reason">${escapeHtml(step.disabledReason)}</p>` : ''}
-          ${nextCopy ? `<p class="next-guidance">${escapeHtml(nextCopy)}</p>` : ''}
+      <section class="panel layer-output-panel" style="--layer-color: ${escapeAttribute(config.color)}; --layer-border: ${escapeAttribute(config.borderColor)}">
+        <div class="panel-heading">
+          <h3>${escapeHtml(config.title)} Outputs ${renderInfoTooltip(config.oneLiner)}</h3>
+          ${statusBadge(stage?.status || 'locked')}
         </div>
-        <div class="guided-status">
-          ${statusBadge(step.status)}
+        <div class="metric-grid compact-grid">
+          ${config.outputs.map((output) => {
+            const val = values[output];
+            const short = outputShortName(output);
+            return `<div class="metric"><span title="${escapeAttribute(output)}">${escapeHtml(short)}</span><strong>${escapeHtml(val != null ? val : '-')}</strong></div>`;
+          }).join('')}
         </div>
+        <p class="note">Derived from ${config.outputs.length} field(s). Data flows into the next layer.</p>
       </section>
     `;
   }
 
-  function workflowSteps() {
-    return getWorkflowSteps({
+  function outputShortName(field) {
+    const map = {
+      period_type: 'Period Type', comparison_side: 'Side', comparable_week_slot: 'Slot',
+      comparison_window_id: 'Window ID', system_include_flag: 'Sys Include', system_reason_code: 'Sys Reason',
+      source_data_exists: 'Data Exists', source_row_count: 'Row Count', source_value: 'Value',
+      manual_include_flag: 'Manual Incl', paired_slot_include_flag: 'Paired Slot',
+      final_include_flag: 'Final Incl', mask_include_flag: 'Mask Incl', final_reason_code: 'Reason'
+    };
+    return map[field] || field;
+  }
+
+  function layerOutputValues(layerId) {
+    const periodRows = state.periodRows || [];
+    const summary = selectedScopeSummary();
+    const uniquePeriodTypes = new Set(periodRows.map((r) => r.period_type)).size;
+    const uniqueSlots = new Set(periodRows.map((r) => r.comparable_week_slot)).size;
+    const uniqueWindows = new Set(periodRows.map((r) => r.comparison_window_id).filter(Boolean)).size;
+
+    if (layerId === LAYER_STAGE_IDS.calendar) {
+      return {
+        period_type: uniquePeriodTypes || '5-6',
+        comparison_side: 'current / prior',
+        comparable_week_slot: uniqueSlots,
+        comparison_window_id: uniqueWindows
+      };
+    }
+    if (layerId === LAYER_STAGE_IDS.trading) {
+      return {
+        system_include_flag: `${summary.final_included_rows || 0} Y / ${summary.system_excluded_week_count || summary.final_excluded_rows || 0} N`,
+        system_reason_code: summary.system_excluded_week_count > 0 ? 'see review table' : 'INCLUDED'
+      };
+    }
+    if (layerId === LAYER_STAGE_IDS.metricCoverage) {
+      return {
+        source_data_exists: `${summary.source_rows_available > 0 ? 'Y' : 'N'} (${summary.missing_source_week_count || 0} weeks missing)`,
+        source_row_count: summary.source_rows_available || summary.scoped_source_row_count || 0,
+        source_value: summary.scoped_source_row_count ? 'Aggregated' : '-'
+      };
+    }
+    if (layerId === LAYER_STAGE_IDS.comparableCoverage) {
+      return {
+        manual_include_flag: `${summary.active_manual_override_count || 0} overrides`,
+        paired_slot_include_flag: summary.final_excluded_rows > 0 ? 'N on excluded' : 'Y',
+        final_include_flag: `${summary.final_included_rows || 0} Y / ${summary.final_excluded_rows || 0} N`,
+        mask_include_flag: `${summary.final_included_rows || 0} Y / ${summary.final_excluded_rows || 0} N`,
+        final_reason_code: 'see validation summary'
+      };
+    }
+    return {};
+  }
+
+  function renderTradingExpectationPanel() {
+    const summary = selectedScopeSummary();
+    const includedFlag = summary.final_included_rows && summary.final_included_rows > 0 ? 'Y' : '-';
+    const excludedFlag = summary.final_excluded_rows && summary.final_excluded_rows > 0 ? 'N' : '-';
+    return `
+      <section class="panel panel-wide">
+        <div class="panel-heading">
+          <h2>Trading Expectation ${renderInfoTooltip(getTooltipCopy('tradingExpectation'))}</h2>
+        </div>
+        <div class="metric-grid">
+          ${metric(labels.selectedStore, selectedStoreDisplay())}
+          ${metric(labels.storeTradingDateWarnings, summary.missing_commencement_count)}
+          ${metric(labels.storeClosureStatus, summary.selected_store_closure_status)}
+          ${metric(labels.weeksNotExpectedToTrade, summary.system_excluded_week_count)}
+          ${metric('Store-Weeks Expected to Trade', summary.final_included_rows || 'N/A')}
+          ${metric('Store-Weeks Not Expected', summary.system_excluded_week_count || summary.final_excluded_rows || 'N/A')}
+        </div>
+        <p class="note">Default disposition: TRADING. A store is expected to trade unless a lifecycle event or override says otherwise. Flag: system_include_flag.</p>
+      </section>
+    `;
+  }
+
+  function renderMetricCoveragePanel() {
+    const summary = selectedScopeSummary();
+    const totalExpectedWeeks = (summary.weekly_coverage_record_count || 0) + (summary.missing_source_week_count || 0);
+    const pctCovered = totalExpectedWeeks > 0
+      ? Math.round(((summary.weekly_coverage_record_count || 0) / totalExpectedWeeks) * 100)
+      : 0;
+    return `
+      <section class="panel panel-wide">
+        <div class="panel-heading">
+          <h2>Metric Coverage ${renderInfoTooltip('Indicates whether metric data exists for each store-metric-week. This is a transparency layer — missing data is a warning, not a blocking exclusion.')}</h2>
+        </div>
+        <div class="metric-grid">
+          ${metric(labels.weeklyCoverageRecords, summary.weekly_coverage_record_count)}
+          ${metric('Source Records Matched', summary.source_rows_available)}
+          ${metric('Weeks Without Source Data', summary.missing_source_week_count)}
+          ${metric('Data Coverage %', `${pctCovered}%`)}
+        </div>
+        <p class="note">Missing data within an expected trading week is tolerated by default — surfaced transparently, not punished. Flags: source_data_exists, source_row_count.</p>
+      </section>
+    `;
+  }
+
+  function layerStages() {
+    return getLayerStages({
       hasSourceProfile: Boolean(state.sourceProfile),
       hasSelectedScope: Boolean(scopeSelectionReady()),
       hasReviewConfirmed: Boolean(state.reviewConfirmed),
-      hasMaskCompleted: Boolean(state.stepCompletion.mask),
-      hasMaskAcknowledged: Boolean(state.stepAcknowledged.mask),
+      hasMaskCompleted: Boolean(state.stepCompletion?.mask || state.stepCompletion?.ccm),
+      hasMaskAcknowledged: Boolean(state.stepAcknowledged?.mask || state.stepAcknowledged?.ccm),
       hasComparisonRows: Boolean(state.l4lRows.length),
-      hasWorkflowAcknowledged: Boolean(state.stepAcknowledged.workflow),
+      hasWorkflowAcknowledged: Boolean(state.stepAcknowledged?.workflow || state.stepAcknowledged?.presentation),
       hasMaskError: Boolean(state.validationSummary?.rebuild_status === 'failed' || state.validationSummary?.rebuild_status === 'clear_failed'),
       hasWorkflowError: Boolean(state.error && state.error.includes('Workflow')),
-      hasComparisonError: Boolean(state.l4lValidation && state.l4lValidation.valid === false)
+      hasComparisonError: Boolean(state.l4lValidation && state.l4lValidation.valid === false),
+      stageConfirmed: state.stageConfirmed
     });
   }
 
-  function activeWorkflowStep() {
-    const steps = workflowSteps();
-    const activeStepId = getActiveWorkflowStepId(steps, state.activeStepId);
-    return steps.find((step) => step.id === activeStepId) || steps[0];
+  function activeLayerStage() {
+    const stages = layerStages();
+    const activeId = getActiveLayerStageId(stages, state.activeLayerId);
+    return stages.find((stage) => stage.id === activeId) || stages[0];
   }
 
-  function guidedStepDescription(stepId) {
-    if (stepId === 'mask') return 'Generate or rebuild the selected-scope Comparable Coverage mask for the current Store, Metric, and Period Lens.';
-    if (stepId === 'workflow') return 'Run the mapped Domo Workflow so AppDB mask output is prepared into the L4L comparison fact dataset.';
-    if (stepId === 'results') return 'Review Current vs Prior results with Comparable Coverage ON or OFF.';
-    return 'Review the weeks removed by Comparable Coverage and the business reason for each exclusion.';
-  }
-
-  function nextStepCopy(step) {
-    if (step.status === 'completed_unacknowledged') return 'Click Complete in the progress modal before the next step unlocks.';
-    if (step.id === 'workflow' && step.status === 'ready') return 'The Workflow action is now available because the selected-scope mask was acknowledged.';
-    if (step.id === 'results' && step.status === 'ready') return 'Refresh Results to load the latest L4L comparison facts.';
-    return '';
-  }
+  function workflowSteps() { return layerStages(); }
+  function activeWorkflowStep() { return activeLayerStage(); }
 
   function nextBestAction() {
-    const step = activeWorkflowStep();
+    const stage = activeLayerStage();
     const support = getWorkflowTriggerSupport();
 
     if (!state.sourceProfile) {
       return {
-        title: 'Load source summary to begin.',
-        reason: 'The app needs the mapped source_metrics alias before Store, Metric, and Period Lens can be validated.',
+        title: 'Load source data to begin.',
+        reason: 'The Calendar Layer needs the mapped sourceMetrics alias to derive fiscal periods and comparable slots.',
         action: 'refresh-source',
         buttonLabel: 'Refresh Source',
         disabled: state.loading
       };
     }
 
-    if (step.status === 'completed_unacknowledged' && step.id === 'mask') {
+    if (stage.id === LAYER_STAGE_IDS.calendar) {
       return {
-        title: 'Review the completed mask build.',
-        reason: 'Click Complete and Unlock Workflow before preparing comparison facts.',
-        status: step.status
+        title: 'Calendar structure is loaded.',
+        reason: 'Fiscal periods, comparison windows, and comparable slots have been derived from source data. Proceed to review Trading Expectations.',
+        status: stage.status
       };
     }
 
-    if (step.status === 'completed_unacknowledged' && step.id === 'workflow') {
+    if (stage.id === LAYER_STAGE_IDS.trading) {
       return {
-        title: 'Review the completed Workflow run.',
-        reason: 'Click Complete and Review Results before moving to the result board.',
-        status: step.status
+        title: 'Review trading expectations for each store.',
+        reason: 'Select a Store and Metric to see which weeks the store was expected to trade.',
+        status: stage.status
       };
     }
 
-    if (step.id === 'mask') {
+    if (stage.id === LAYER_STAGE_IDS.metricCoverage) {
+      return {
+        title: 'Review metric data coverage.',
+        reason: 'Check which store-metric-weeks have source data and which are missing. Missing data is tolerated by default — visible, not excluded.',
+        status: stage.status
+      };
+    }
+
+    if (stage.id === LAYER_STAGE_IDS.comparableCoverage) {
       if (!state.reviewConfirmed) {
         return {
           title: 'Confirm Comparable Week Review.',
-          reason: 'Review the comparable weeks and click Save Overrides to confirm Comparable Week Review before building the selected-scope mask.',
+          reason: 'Review the comparable weeks and click Save Overrides before building the mask.',
           action: 'save-overrides',
           buttonLabel: 'Save Overrides',
           disabled: state.loading || !scopeSelectionReady(),
-          disabledReason: 'Save Overrides to confirm Comparable Week Review before Build Coverage Mask becomes available.',
           kind: 'secondary'
         };
       }
-
       return {
-        title: `Build the selected-scope mask for ${selectedStoreDisplay()} / ${selectedMetricDisplay()} / ${state.selectedPeriodType || '-'}.`,
-        reason: 'The Workflow uses this selected-scope mask output to prepare comparison facts.',
+        title: `Build the coverage mask for ${selectedStoreDisplay()} / ${selectedMetricDisplay()}.`,
+        reason: 'All six period types are generated. Manual overrides and propagation rules will be applied.',
         action: 'generate-mask',
         buttonLabel: 'Rebuild Selected Scope Mask',
-        disabled: step.status === 'locked' || state.loading || !selectedPeriodRows().length,
-        disabledReason: step.disabledReason
+        disabled: stage.status === 'locked' || state.loading,
+        disabledReason: stage.disabledReason
       };
     }
 
-    if (step.id === 'workflow') {
+    // presentation
+    if (!state.l4lRows.length) {
+      if (support.supported) {
+        return {
+          title: 'Run Prepare L4L Comparison Facts.',
+          reason: 'The mask is ready. Trigger the Domo Workflow to prepare comparison facts.',
+          action: 'run-l4l-workflow',
+          buttonLabel: 'Run Workflow and Refresh Results',
+          disabled: state.loading,
+          kind: 'primary'
+        };
+      }
       return {
-        title: 'Run Prepare L4L Comparison Facts.',
-        reason: support.supported
-          ? 'The selected-scope mask is acknowledged and the mapped Domo Workflow can now prepare comparison facts.'
-          : 'Automatic trigger is unavailable in this runtime. Run the Workflow manually in Domo, then refresh results.',
-        action: support.supported ? 'run-l4l-workflow' : 'refresh-l4l-results',
-        buttonLabel: support.supported ? 'Run Workflow and Refresh Results' : 'Refresh Results',
-        disabled: state.loading || (support.supported && step.status !== 'ready'),
-        disabledReason: step.disabledReason,
-        kind: support.supported ? 'primary' : 'secondary'
-      };
-    }
-
-    if (step.id === 'results') {
-      return {
-        title: 'Review L4L ON vs L4L OFF results.',
-        reason: state.l4lRows.length
-          ? 'Comparison facts are loaded. Use the result board to understand the impact of Comparable Coverage.'
-          : 'Refresh Results after the Domo Workflow completes.',
+        title: 'Refresh L4L results.',
+        reason: 'Run the Workflow manually in Domo, then refresh results here.',
         action: 'refresh-l4l-results',
         buttonLabel: 'Refresh Results',
-        disabled: state.loading,
-        kind: 'secondary'
+        disabled: state.loading
       };
     }
-
     return {
-      title: 'Review the weeks excluded by Comparable Coverage.',
-      reason: 'Use the evidence area to see which weeks were removed from L4L ON and why.',
-      status: step.status
+      title: 'Review L4L ON vs L4L OFF results.',
+      reason: `${state.l4lRows.length} comparison fact rows loaded. Use L4L ON/OFF toggle and explore excluded weeks.`,
+      status: stage.status
     };
   }
 
@@ -529,7 +678,6 @@ export function createApp(root) {
 
   function renderSelectionControls() {
     const profile = state.sourceProfile;
-    const periodTypes = unique(state.periodRows.map((row) => row.period_type));
     return `
       <section class="panel">
         <div class="panel-heading">
@@ -551,16 +699,8 @@ export function createApp(root) {
                 ${(profile.metrics || []).map((item) => `<option value="${escapeAttribute(item.metric)}" ${selectedMetricList().includes(item.metric) ? 'selected' : ''}>${escapeHtml(item.metric)}</option>`).join('')}
               </select>
             </label>
-            <label>
-              <span>Period Filter (review only)</span>
-              <select data-action="select-period-type" ${state.loading ? 'disabled' : ''}>
-                ${periodTypes.map((periodType) => `<option value="${escapeAttribute(periodType)}" ${periodType === state.selectedPeriodType ? 'selected' : ''}>${escapeHtml(periodType)}</option>`).join('')}
-              </select>
-            </label>
           </div>
-          <p class="note">Current selection: ${escapeHtml(selectedStoreDisplay())} / ${escapeHtml(selectedMetricDisplay())}.</p>
-          <p class="note">All six approved period types are generated automatically. Fixed comparison: Last Completed periods compare against Previous Period. YTD, QTD, and MTD compare against Same Period Last Year.</p>
-          <p class="note">The Period Filter above affects only the Comparable Week Review table — it does not limit mask generation scope.</p>
+          <p class="note">Current selection: ${escapeHtml(selectedStoreDisplay())} / ${escapeHtml(selectedMetricDisplay())}. All six approved period types are generated automatically.</p>
         ` : emptyState('Load source data before selecting a scope.')}
       </section>
     `;
@@ -569,35 +709,58 @@ export function createApp(root) {
   function renderSelectedScopeSummary() {
     const profile = state.sourceProfile;
     const summary = selectedScopeSummary();
+    const excludedPct = summary.comparableWeekTotal > 0
+      ? Math.round((summary.final_excluded_rows / summary.comparableWeekTotal) * 100)
+      : 0;
+    if (!profile) return emptyState('No selected scope is available yet.');
     return `
-      <section class="panel panel-wide">
+      <section class="panel panel-wide scope-summary-panel">
         <div class="panel-heading">
           <h2>Selected Scope Summary</h2>
+          <span class="scope-summary-badge">${escapeHtml(selectedStoreDisplay())} · ${escapeHtml(selectedMetricDisplay())}</span>
         </div>
-        ${profile ? `
-          <div class="metric-grid">
-            ${metric(labels.selectedSourceRecords, summary.scoped_source_row_count)}
-            ${metric(labels.weeklyCoverageRecords, summary.weekly_coverage_record_count)}
-            ${metric(labels.selectedStore, selectedStoreDisplay())}
-            ${metric(labels.selectedMetric, selectedMetricDisplay())}
-            ${metric(labels.selectedPeriodLens, summary.selected_period_type || '-')}
-            ${metric(labels.currentComparableWeeks, summary.current_side_week_count)}
-            ${metric(labels.priorComparableWeeks, summary.prior_side_week_count)}
-            ${metric(labels.firstComparableWeek, summary.scoped_min_week_ending || '-')}
-            ${metric(labels.latestComparableWeek, summary.scoped_max_week_ending || '-')}
-            ${metric(labels.storeTradingDateWarnings, summary.missing_commencement_count)}
-            ${metric(labels.storeClosureStatus, summary.selected_store_closure_status)}
-            ${metric(labels.sourceRecordsMatched, summary.source_rows_available)}
-            ${metric(labels.weeksWithoutSourceData, summary.missing_source_week_count)}
-            ${metric(labels.manualCoverageAdjustments, summary.active_manual_override_count)}
-            ${metric(labels.weeksNotExpectedToTrade, summary.system_excluded_week_count)}
-            ${metric(labels.includedComparableWeeks, summary.final_included_rows)}
-            ${metric(labels.excludedComparableWeeks, summary.final_excluded_rows)}
+
+        <div class="scope-summary-layout">
+          <div class="ss-card ss-card-scope">
+            <p class="ss-eyebrow">Scope</p>
+            <div class="ss-row">${ssMetric('Store', selectedStoreDisplay(), 'The store(s) included in this CCM run.')}</div>
+            <div class="ss-row">${ssMetric('Metric', selectedMetricDisplay(), 'The metric(s) included in this CCM run.')}</div>
+            <div class="ss-row">${ssMetric('Period Types', 'All 6 · LCW/LCM/LCQ/YTD/QTD/MTD', 'All six approved period types are generated automatically for every run.')}</div>
           </div>
-          <p class="note">${escapeHtml(helperText.weeklyCoverageRecords)} ${escapeHtml(helperText.comparableWeekCounts)}</p>
-        ` : emptyState('No selected scope is available yet.')}
+
+          <div class="ss-card ss-card-weeks">
+            <p class="ss-eyebrow">Comparable Weeks</p>
+            <div class="ss-metric-row">
+              ${ssBigMetric('Current', summary.current_side_week_count, 'Comparable weeks on the current side of the comparison window.')}
+              ${ssBigMetric('Prior', summary.prior_side_week_count, 'Comparable weeks on the prior side of the comparison window.')}
+            </div>
+            <div class="ss-metric-row">
+              ${ssBigMetric('Included', summary.final_included_rows, 'Weeks included in LFL ON after all CCM rules are applied. These weeks are fair to compare.')}
+              ${ssBigMetric('Excluded', summary.final_excluded_rows, `Weeks excluded from LFL ON (${excludedPct}% of comparable weeks). Visible in LFL OFF.`)}
+            </div>
+          </div>
+
+          <div class="ss-card ss-card-quality">
+            <p class="ss-eyebrow">Data Quality &amp; Overrides</p>
+            <div class="ss-row">${ssMetric('Weeks Without Source Data', summary.missing_source_week_count, 'Store-metric-weeks that have no source data. Tolerated by default — visible, not excluded.')}</div>
+            <div class="ss-row">${ssMetric('Manual Overrides', summary.active_manual_override_count, 'User-applied manual coverage adjustments (Store + Metric + Week grain).')}</div>
+            <div class="ss-row">${ssMetric('Store Status', summary.selected_store_closure_status, 'Store lifecycle status — trading commencement and closure dates.')}</div>
+          </div>
+        </div>
+
+        <p class="note scope-summary-note">Comparable weeks are the core unit of CCM. <strong>Included</strong> weeks pass all comparability rules and appear in LFL ON. <strong>Excluded</strong> weeks are removed by slot completeness, paired propagation, or manual overrides but remain visible in LFL OFF.</p>
       </section>
     `;
+  }
+
+  function ssMetric(label, value, tooltip) {
+    const tip = tooltip ? ` title="${escapeAttribute(tooltip)}"` : '';
+    return `<span class="ss-label"${tip}>${escapeHtml(label)}${tooltip ? ' <em class="ss-tip-icon">?</em>' : ''}</span> <strong class="ss-value">${escapeHtml(value)}</strong>`;
+  }
+
+  function ssBigMetric(label, value, tooltip) {
+    const tip = tooltip ? ` title="${escapeAttribute(tooltip)}"` : '';
+    return `<div class="ss-big"${tip}><span class="ss-big-value">${escapeHtml(value)}</span><span class="ss-big-label">${escapeHtml(label)}${tooltip ? ' <em class="ss-tip-icon">?</em>' : ''}</span></div>`;
   }
 
   function renderPeriodDefinitions() {
@@ -774,27 +937,30 @@ export function createApp(root) {
   }
 
   function renderDiagnosticsDrawer() {
+    if (!state.diagnosticsOpen) return '';
     const source = state.diagnostics?.source || {};
     const appDb = state.diagnostics?.appDb || {};
     const l4l = state.l4lDiagnostics || {};
     const support = getWorkflowTriggerSupport();
 
     return `
-      <aside class="diagnostics-drawer ${state.diagnosticsOpen ? 'drawer-open' : ''}" aria-label="Technical Details" aria-hidden="${state.diagnosticsOpen ? 'false' : 'true'}">
-        <div class="drawer-header">
-          <div>
-            <p class="eyebrow">Technical Details</p>
-            <h2>Diagnostics ${renderInfoTooltip(getTooltipCopy('diagnostics'))}</h2>
+      <section class="modal-backdrop diagnostics-backdrop" role="presentation" data-action="close-diagnostics">
+        <div class="execution-modal diagnostics-modal" role="dialog" aria-modal="true" aria-labelledby="diagnostics-modal-title" onclick="event.stopPropagation()">
+          <div class="execution-header">
+            <div>
+              <p class="eyebrow">Technical Details</p>
+              <h2 id="diagnostics-modal-title">Diagnostics ${renderInfoTooltip(getTooltipCopy('diagnostics'))}</h2>
+            </div>
+            <button type="button" class="secondary compact" data-action="close-diagnostics">Close</button>
           </div>
-          <button type="button" class="secondary icon-button" data-action="close-diagnostics">Close</button>
+          <div class="diagnostics-grid">
+            ${diagnosticCard('Source alias', source.alias || SOURCE_DATASET_ALIAS, source.queryable, source.message || sourceStatusText(source), source)}
+            ${diagnosticCard('AppDB collections', appDb.reachable ? 'Reachable' : 'Fallback', appDb.reachable, appDb.message || appDbStatusText(appDb), appDb)}
+            ${diagnosticCard('Workflow trigger', PREPARE_L4L_WORKFLOW.alias, support.supported, support.reason, {})}
+            ${diagnosticCard('L4L comparison dataset', l4l.alias || L4L_COMPARISON_ALIAS, l4l.queryable, l4l.message || state.l4lMessage, l4l)}
+          </div>
         </div>
-        <div class="diagnostics-grid">
-          ${diagnosticCard('Source alias', source.alias || SOURCE_DATASET_ALIAS, source.queryable, source.message || sourceStatusText(source), source)}
-          ${diagnosticCard('AppDB collections', appDb.reachable ? 'Reachable' : 'Fallback', appDb.reachable, appDb.message || appDbStatusText(appDb), appDb)}
-          ${diagnosticCard('Workflow trigger', PREPARE_L4L_WORKFLOW.alias, support.supported, support.reason, {})}
-          ${diagnosticCard('L4L comparison dataset', l4l.alias || L4L_COMPARISON_ALIAS, l4l.queryable, l4l.message || state.l4lMessage, l4l)}
-        </div>
-      </aside>
+      </section>
     `;
   }
 
@@ -1440,7 +1606,11 @@ export function createApp(root) {
     bindAll('run-l4l-workflow', 'click', runL4LWorkflow);
     bindAll('refresh-l4l-results', 'click', refreshL4LResults);
     bindAll('toggle-l4l-coverage', 'click', () => setL4LCoverageMode(!state.l4lComparableCoverageOn));
-    bindAll('open-workflow-step', 'click', openWorkflowStep);
+    bindAll('open-layer-stage', 'click', openLayerStage);
+    bindAll('confirm-stage', 'click', (event) => {
+      const stageId = event.currentTarget?.dataset?.stageId || '';
+      handleConfirmStage(stageId);
+    });
     bindAll('start-new-run', 'click', startNewRun);
     bindAll('change-scope', 'click', changeScope);
     bindAll('toggle-diagnostics', 'click', toggleDiagnostics);
@@ -1512,18 +1682,31 @@ export function createApp(root) {
     });
   }
 
-  function openWorkflowStep(event) {
-    const stepId = event.currentTarget?.dataset?.stepId || '';
-    const step = workflowSteps().find((item) => item.id === stepId);
-    if (!step || step.status === 'locked') return;
+  function openLayerStage(event) {
+    const layerId = event.currentTarget?.dataset?.layerId || '';
+    const stage = layerStages().find((item) => item.id === layerId);
+    if (!stage) return;
 
-    state.activeStepId = step.id;
-    state.status = `${step.title} is in focus.`;
+    state.activeLayerId = stage.id;
+    state.status = stage.status === 'locked'
+      ? `${stage.title} is locked. Complete earlier stages first.`
+      : `${stage.title} is in focus.`;
     render();
   }
 
+  function openWorkflowStep(event) {
+    const stepId = event.currentTarget?.dataset?.stepId || '';
+    if (stepId) {
+      state.activeLayerId = stepId;
+      state.status = 'Navigated to selected stage.';
+      render();
+      return;
+    }
+    openLayerStage(event);
+  }
+
   function changeScope() {
-    state.activeStepId = 'mask';
+    state.activeLayerId = LAYER_STAGE_IDS.comparableCoverage;
     state.status = 'Choose a Store and Metric in the active work area. All six period types are generated automatically.';
     render();
   }
@@ -1540,9 +1723,16 @@ export function createApp(root) {
     state.l4lRows = [];
     state.l4lValidation = { valid: true, missingFields: [] };
     state.l4lSource = 'none';
-    state.l4lMessage = 'Select a Store, Metric, and Period Lens, then confirm Comparable Week Review.';
-    state.activeStepId = 'mask';
+    state.l4lMessage = 'Select Store and Metric in Stage 1, then proceed through each stage.';
+    state.activeLayerId = LAYER_STAGE_IDS.calendar;
     state.activeEvidenceTab = 'excluded';
+    state.stageConfirmed = {
+      calendar: false,
+      trading: false,
+      metricCoverage: false,
+      comparableCoverage: false,
+      presentation: false
+    };
     state.stepAcknowledged = {
       mask: false,
       workflow: false
@@ -1551,7 +1741,7 @@ export function createApp(root) {
       mask: false
     };
     state.validationSummary = null;
-    state.status = 'New run started. Confirm Comparable Week Review before rebuilding the selected-scope mask.';
+    state.status = 'New run started. Select Store and Metric in Stage 1, then confirm each stage sequentially.';
     render();
   }
 
@@ -1566,7 +1756,7 @@ export function createApp(root) {
       state.periodRows = periods.rows;
       state.periodPage = 1;
       state.reviewConfirmed = false;
-      state.activeStepId = 'mask';
+      state.activeLayerId = LAYER_STAGE_IDS.comparableCoverage;
       if (!state.selectedStoreCode) state.selectedStoreCode = sourceResult.profile?.stores?.[0]?.store_code || '';
       state.selectedMetrics = resolveMetrics(sourceResult.profile, state.selectedMetrics, state.selectedMetric);
       state.selectedMetric = state.selectedMetrics[0] || '';
@@ -1703,7 +1893,7 @@ export function createApp(root) {
       state.stepCompletion.mask = true;
       state.stepAcknowledged.mask = false;
       state.stepAcknowledged.workflow = false;
-      state.activeStepId = 'mask';
+      state.activeLayerId = LAYER_STAGE_IDS.comparableCoverage;
       state.scopeDirty = false;
       state.l4lRows = [];
       state.l4lValidation = { valid: true, missingFields: [] };
@@ -1752,6 +1942,7 @@ export function createApp(root) {
     state.selectedMetric = nextMetrics[0] || '';
     state.periodPage = 1;
     state.pendingWrite = null;
+    invalidateScopeCache();
     state.loading = true;
     state.status = 'Loading manual coverage adjustments for selected Store and Metric...';
     render();
@@ -1769,12 +1960,13 @@ export function createApp(root) {
   }
 
   function markScopeChanged() {
+    invalidateScopeCache();
     const hasGeneratedContext = state.stepCompletion.mask || state.stepAcknowledged.mask || state.stepAcknowledged.workflow || state.l4lRows.length;
     state.reviewConfirmed = false;
     if (!hasGeneratedContext) return;
 
     state.scopeDirty = true;
-    state.activeStepId = 'mask';
+    // Do NOT auto-navigate — user stays on current stage
     state.stepCompletion.mask = false;
     state.stepAcknowledged.mask = false;
     state.stepAcknowledged.workflow = false;
@@ -1786,6 +1978,20 @@ export function createApp(root) {
 
   async function loadOverridesForSelection() {
     if (!state.selectedStoreCode || !selectedMetricList().length) return [];
+
+    // Fast path: skip AppDB call in mock mode to avoid 404 timeout
+    if (state.sourceMode === 'mock' || state.diagnostics?.source?.queryable === false) {
+      invalidateScopeCache();
+      state.diagnostics = mergeDiagnostics(state.diagnostics, {
+        appDb: {
+          reachable: false,
+          source: 'mock (local fallback)',
+          collections: Object.values(COLLECTIONS),
+          message: 'Local mock mode — AppDB is not available. Manual overrides are stored in memory only.'
+        }
+      });
+      return state.manualOverrides.length ? state.manualOverrides : [];
+    }
 
     try {
       const overrides = await loadManualOverridesForScope({
@@ -1827,7 +2033,8 @@ export function createApp(root) {
 
     if (!singleOverrideScope()) {
       state.reviewConfirmed = true;
-      state.activeStepId = 'mask';
+      invalidateScopeCache();
+      state.activeLayerId = LAYER_STAGE_IDS.comparableCoverage;
       state.status = `Comparable Week Review confirmed for ${selectedStoreDisplay()} / ${selectedMetricDisplay()}. Existing active overrides will be applied during mask generation.`;
       state.error = '';
       render();
@@ -1844,7 +2051,8 @@ export function createApp(root) {
       });
       state.manualOverrides = await loadOverridesForSelection();
       state.reviewConfirmed = true;
-      state.activeStepId = 'mask';
+      invalidateScopeCache();
+      state.activeLayerId = LAYER_STAGE_IDS.comparableCoverage;
       state.status = `Saved ${result.savedCount} manual coverage adjustment document(s).`;
       state.error = '';
     } catch (error) {
@@ -1970,7 +2178,7 @@ export function createApp(root) {
       if (!result.empty && result.rows.length) {
         state.comparisonRefreshPending = false;
         state.stepAcknowledged.workflow = true;
-        state.activeStepId = 'results';
+        state.activeLayerId = LAYER_STAGE_IDS.presentation;
       } else {
         state.activeStepId = 'workflow';
       }
@@ -2016,14 +2224,20 @@ export function createApp(root) {
 
   function completeExecutionModal() {
     if (state.executionModal?.type === 'mask') {
+      if (!state.stepAcknowledged) state.stepAcknowledged = {};
       state.stepAcknowledged.mask = true;
-      state.activeStepId = 'workflow';
-      state.status = 'Selected-scope mask is ready. Prepare L4L comparison facts next.';
+      state.stepAcknowledged.ccm = true;
+      state.stageConfirmed.comparableCoverage = true;
+      state.activeLayerId = LAYER_STAGE_IDS.presentation;
+      state.status = 'Coverage mask is ready. Review results in the Presentation layer.';
     }
 
     if (state.executionModal?.type === 'workflow') {
+      if (!state.stepAcknowledged) state.stepAcknowledged = {};
       state.stepAcknowledged.workflow = true;
-      state.activeStepId = state.l4lRows.length ? 'results' : 'workflow';
+      state.stepAcknowledged.presentation = true;
+      state.stageConfirmed.presentation = true;
+      state.activeLayerId = LAYER_STAGE_IDS.presentation;
       state.status = state.comparisonRefreshPending
         ? 'Workflow completed. Domo may still be refreshing the output dataset. Click Refresh Results after the Domo dataset refresh completes.'
         : state.l4lRows.length
@@ -2032,7 +2246,7 @@ export function createApp(root) {
     }
 
     if (state.executionModal?.type === 'refresh') {
-      state.activeStepId = state.l4lRows.length ? 'results' : 'workflow';
+      state.activeLayerId = LAYER_STAGE_IDS.presentation;
       state.status = state.l4lRows.length
         ? 'L4L comparison results are ready.'
         : state.l4lMessage || 'Refresh completed.';
@@ -2127,8 +2341,33 @@ export function createApp(root) {
     return state.periodRows;
   }
 
+  let _cachedSummary = null;
+  let _cachedReviewRows = null;
+  let _cacheKey = '';
+
+  function scopeCacheKey() {
+    return [
+      state.selectedStoreCode,
+      selectedMetricList().join(','),
+      state.selectedPeriodType || '',
+      state.reviewConfirmed ? '1' : '0',
+      state.manualOverrides.length,
+      state.periodRows.length
+    ].join('|');
+  }
+
+  function invalidateScopeCache() {
+    _cachedSummary = null;
+    _cachedReviewRows = null;
+    _cacheKey = '';
+  }
+
   function selectedScopeSummary() {
-    return computeSelectedScopeSummary({
+    const key = scopeCacheKey();
+    if (_cachedSummary && _cacheKey === key) return _cachedSummary;
+
+    _cachedReviewRows = computeReviewRows(selectedPeriodRows());
+    _cachedSummary = computeSelectedScopeSummary({
       sourceRows: state.sourceRows,
       sourceFacts: state.sourceProfile?.sourceFacts,
       selectedStore: selectedStore(),
@@ -2138,11 +2377,23 @@ export function createApp(root) {
       selectedPeriodType: state.selectedPeriodType,
       periodRows: state.periodRows,
       manualOverrides: state.manualOverrides,
-      maskRows: reviewRowsForRows(selectedPeriodRows())
+      maskRows: _cachedReviewRows
     });
+    _cacheKey = key;
+    return _cachedSummary;
   }
 
   function reviewRowsForRows(periodRows) {
+    const key = scopeCacheKey();
+    if (_cachedReviewRows && _cacheKey === key) return _cachedReviewRows;
+    const store = selectedStore();
+    if (!store || !singleMetricSelection()) return [];
+    _cachedReviewRows = computeReviewRows(periodRows);
+    _cacheKey = key;
+    return _cachedReviewRows;
+  }
+
+  function computeReviewRows(periodRows) {
     const store = selectedStore();
     if (!store || !singleMetricSelection()) return [];
 
@@ -2267,10 +2518,12 @@ export function createApp(root) {
 
     if (index >= 0) {
       state.manualOverrides = state.manualOverrides.map((override, itemIndex) => (itemIndex === index ? next : override));
+      invalidateScopeCache();
       return;
     }
 
     state.manualOverrides = [...state.manualOverrides, next];
+    invalidateScopeCache();
   }
 
   function setLoading(message) {
@@ -2310,7 +2563,8 @@ function persistUiState(state) {
       status: state.status,
       l4lMessage: state.l4lMessage,
       l4lComparableCoverageOn: state.l4lComparableCoverageOn,
-      activeStepId: state.activeStepId,
+      activeLayerId: state.activeLayerId,
+      stageConfirmed: state.stageConfirmed,
       diagnosticsOpen: state.diagnosticsOpen,
       activeEvidenceTab: state.activeEvidenceTab,
       excludedFilters: state.excludedFilters,
@@ -2394,6 +2648,15 @@ function renderInfoTooltip(text) {
 function statusBadge(status) {
   const label = statusLabel(status);
   return `<span class="status-badge status-${escapeAttribute(status || 'unknown')}">${escapeHtml(label)}</span>`;
+}
+
+function layerStatusLabel(status) {
+  if (status === 'ready') return 'Ready';
+  if (status === 'running') return 'Active';
+  if (status === 'complete') return 'Done';
+  if (status === 'completed_unacknowledged') return 'Review';
+  if (status === 'error') return 'Error';
+  return 'Locked';
 }
 
 function statusLabel(status) {

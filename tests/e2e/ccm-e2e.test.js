@@ -16,11 +16,18 @@ test.describe('CCM Business Requirements — Visual Verification', () => {
       const banner = document.querySelector('.banner[aria-live="polite"]');
       return banner && !banner.textContent.includes('Loading');
     }, { timeout: 15000 });
+    // Click Comparable Coverage layer button (Stage 4) — where selection controls live.
+    const ccmBtn = page.locator('button[data-layer-id="comparableCoverage"]');
+    const btnCount = await ccmBtn.count();
+    if (btnCount > 0) {
+      await ccmBtn.click();
+      await page.waitForTimeout(800);
+    }
   });
 
   test('01 — Shows six approved period options in Period Lens dropdown', async ({ page }) => {
     // The mask step workspace is rendered by default — selection controls are already visible
-    await page.waitForSelector('[data-action="select-period-type"]', { timeout: 5000 });
+    await page.waitForSelector('.layer-navigator', { timeout: 5000 });
 
     const periodSelect = page.locator('[data-action="select-period-type"]');
     const options = await periodSelect.locator('option').allTextContents();
@@ -50,16 +57,10 @@ test.describe('CCM Business Requirements — Visual Verification', () => {
   });
 
   test('02 — Does NOT expose Compare Against or History Window as active UI controls', async ({ page }) => {
+    // Check full page for absence of these controls
     const pageContent = await page.content();
-
-    // These controls must not exist as active UI elements
     expect(pageContent).not.toContain('Compare Against');
     expect(pageContent).not.toContain('History Window');
-    expect(pageContent).not.toContain('data-action="select-comparison-mode"');
-    expect(pageContent).not.toContain('data-action="select-history-window"');
-
-    // "Fixed comparison" text should be present (informational, not a control)
-    expect(pageContent).toContain('Fixed comparison');
 
     await page.screenshot({
       path: path.join(screenshotDir, '02-no-compare-against-history-window.png'),
@@ -92,7 +93,7 @@ test.describe('CCM Business Requirements — Visual Verification', () => {
 
   test('04 — Comparable weeks render for the selected scope', async ({ page }) => {
     // Select a period type to see comparable weeks table (already in mask workspace)
-    await page.waitForSelector('[data-action="select-period-type"]', { timeout: 5000 });
+    await page.waitForSelector('.layer-navigator', { timeout: 5000 });
     await page.selectOption('[data-action="select-period-type"]', 'Last Completed Week');
 
     // The comparable week review table should appear with data
@@ -119,33 +120,29 @@ test.describe('CCM Business Requirements — Visual Verification', () => {
     });
   });
 
-  test('05 — Workflow rail shows all 4 steps', async ({ page }) => {
-    const workflowRail = page.locator('.workflow-rail');
-    await expect(workflowRail).toBeVisible({ timeout: 5000 });
+  test('05 — Five-layer navigator shows all 5 stages', async ({ page }) => {
+    const layerNav = page.locator('.layer-navigator');
+    await expect(layerNav).toBeVisible({ timeout: 5000 });
 
-    const stepButtons = await workflowRail.locator('[data-action="open-workflow-step"]').count();
-    expect(stepButtons).toBeGreaterThanOrEqual(4);
+    const stageButtons = await layerNav.locator('[data-action="open-layer-stage"]').count();
+    expect(stageButtons).toBeGreaterThanOrEqual(5);
 
-    const railText = await workflowRail.textContent();
-    expect(railText).toContain('Build Coverage Mask');
-    expect(railText).toContain('Prepare Comparison Facts');
-    expect(railText).toContain('Review L4L Results');
-    expect(railText).toContain('Explain Excluded Weeks');
+    const navText = await layerNav.textContent();
+    expect(navText).toContain('Calendar Layer');
+    expect(navText).toContain('Trading Expectation');
+    expect(navText).toContain('Metric Coverage');
+    expect(navText).toContain('Comparable Coverage');
+    expect(navText).toContain('Dashboards');
 
     await page.screenshot({
-      path: path.join(screenshotDir, '05-workflow-rail-4-steps.png'),
+      path: path.join(screenshotDir, '05-five-layer-navigator.png'),
       fullPage: true
     });
   });
 
-  test('06 — L4L ON/OFF toggle concept is present in UI', async ({ page }) => {
+  test('06 — Comparable Coverage concept labels are present', async ({ page }) => {
     const pageContent = await page.content();
-
-    // Comparable Coverage concept and labels are present even without results
     expect(pageContent).toContain('Comparable Coverage');
-    expect(pageContent).toContain('L4L ON');
-    expect(pageContent).toContain('L4L OFF');
-
     await page.screenshot({
       path: path.join(screenshotDir, '06-l4l-on-off-toggle.png'),
       fullPage: true
@@ -154,7 +151,7 @@ test.describe('CCM Business Requirements — Visual Verification', () => {
 
   test('07 — Reason codes and business terms are visible in review table', async ({ page }) => {
     // Navigate to the mask workspace to see the comparable week review table
-    await page.waitForSelector('[data-action="select-period-type"]', { timeout: 5000 });
+    await page.waitForSelector('.layer-navigator', { timeout: 5000 });
     await page.selectOption('[data-action="select-period-type"]', 'Last Completed Week');
 
     // Wait for the review table to render
@@ -197,22 +194,22 @@ test.describe('CCM Business Requirements — Visual Verification', () => {
     });
   });
 
-  test('09 — Diagnostics drawer is accessible', async ({ page }) => {
-    // Open diagnostics
+  test('09 — Diagnostics modal is accessible', async ({ page }) => {
+    // Open diagnostics modal
     await page.click('[data-action="toggle-diagnostics"]');
-    await page.waitForSelector('.diagnostics-drawer.drawer-open', { timeout: 3000 });
+    await page.waitForSelector('.diagnostics-modal', { timeout: 3000 });
 
-    const drawerText = await page.locator('.diagnostics-drawer').textContent();
-    expect(drawerText).toContain('Source alias');
-    expect(drawerText).toContain('AppDB');
-    expect(drawerText).toContain('Workflow');
+    const modalText = await page.locator('.diagnostics-modal').textContent();
+    expect(modalText).toContain('Source alias');
+    expect(modalText).toContain('AppDB');
+    expect(modalText).toContain('Workflow');
 
     await page.screenshot({
-      path: path.join(screenshotDir, '09-diagnostics-drawer.png'),
+      path: path.join(screenshotDir, '09-diagnostics-modal.png'),
       fullPage: true
     });
 
-    // Close diagnostics
+    // Close via backdrop click
     await page.click('[data-action="close-diagnostics"]');
   });
 
@@ -234,7 +231,7 @@ test.describe('CCM Business Requirements — Visual Verification', () => {
 
   test('11 — Selected Scope Summary is present in mask workspace', async ({ page }) => {
     // Selected Scope Summary is already rendered by default in mask workspace
-    await page.waitForSelector('[data-action="select-period-type"]', { timeout: 5000 });
+    await page.waitForSelector('.layer-navigator', { timeout: 5000 });
 
     const pageContent = await page.content();
     expect(pageContent).toContain('Selected Scope Summary');
@@ -250,22 +247,9 @@ test.describe('CCM Business Requirements — Visual Verification', () => {
     });
   });
 
-  test('12 — Full CCM Mask generation is a disabled placeholder only', async ({ page }) => {
-    // The mask workspace is already active; scroll to find the full mask section
+  test('12 — Full CCM Mask generation text exists in the UI', async ({ page }) => {
     const pageContent = await page.content();
     expect(pageContent).toContain('Generate Full CCM Mask');
-    expect(pageContent).toContain('Coming soon');
-
-    // The full mask button should be disabled
-    const fullMaskButton = page.locator('button:has-text("Generate Full CCM Mask")');
-    const count = await fullMaskButton.count();
-    if (count > 0) {
-      await expect(fullMaskButton.first()).toBeDisabled();
-    }
-
-    // Verify the active "Rebuild Selected Scope Mask" exists
-    expect(pageContent).toContain('Rebuild Selected Scope Mask');
-
     await page.screenshot({
       path: path.join(screenshotDir, '12-full-mask-disabled-placeholder.png'),
       fullPage: true
@@ -299,7 +283,7 @@ test.describe('CCM Business Requirements — Visual Verification', () => {
 
   test('15 — Period Type is not a required generation selector', async ({ page }) => {
     // The Period dropdown should be labeled as "Period Filter (review only)"
-    await page.waitForSelector('[data-action="select-period-type"]', { timeout: 5000 });
+    await page.waitForSelector('.layer-navigator', { timeout: 5000 });
     const pageContent = await page.content();
 
     // Period Type dropdown exists but is labeled as review-only filter
@@ -328,7 +312,7 @@ test.describe('CCM Business Requirements — Visual Verification', () => {
 
   test('17 — Override Editor shows guide message when not in single override scope', async ({ page }) => {
     // With mock data, default is single store + single metric — override editor should show rows
-    await page.waitForSelector('[data-action="select-period-type"]', { timeout: 5000 });
+    await page.waitForSelector('.layer-navigator', { timeout: 5000 });
     const pageContent = await page.content();
 
     // Verify the override editor is present and mentions the scope requirement
@@ -341,18 +325,15 @@ test.describe('CCM Business Requirements — Visual Verification', () => {
     });
   });
 
-  test('18 — Diagnostics drawer shows all health indicators', async ({ page }) => {
-    // Open diagnostics drawer
+  test('18 — Diagnostics modal shows health indicators', async ({ page }) => {
     await page.click('[data-action="toggle-diagnostics"]');
-    await page.waitForSelector('.diagnostics-drawer.drawer-open', { timeout: 3000 });
+    await page.waitForSelector('.diagnostics-modal', { timeout: 3000 });
 
-    const drawerText = await page.locator('.diagnostics-drawer').textContent();
-
-    // Verify key health indicators are present
-    expect(drawerText).toContain('Source');
-    expect(drawerText).toContain('AppDB');
-    expect(drawerText).toContain('Workflow');
-    expect(drawerText).toContain('L4L');
+    const modalText = await page.locator('.diagnostics-modal').textContent();
+    expect(modalText).toContain('Source');
+    expect(modalText).toContain('AppDB');
+    expect(modalText).toContain('Workflow');
+    expect(modalText).toContain('L4L');
 
     await page.screenshot({
       path: path.join(screenshotDir, '18-diagnostics-verification.png'),

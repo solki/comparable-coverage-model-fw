@@ -128,6 +128,82 @@ export const CCM_LAYERS = [
   }
 ];
 
+export const LAYER_STAGE_IDS = {
+  calendar: 'calendar',
+  trading: 'trading',
+  metricCoverage: 'metricCoverage',
+  comparableCoverage: 'comparableCoverage',
+  presentation: 'presentation'
+};
+
+export const LAYER_CONFIG = [
+  {
+    id: LAYER_STAGE_IDS.calendar,
+    num: 1,
+    title: 'Calendar Layer',
+    subtitle: 'Time Truth',
+    icon: 'C',
+    color: '#6cb1ff',
+    borderColor: 'rgba(108,177,255,0.5)',
+    bgColor: 'rgba(108,177,255,0.08)',
+    question: 'Which time units belong to which time periods?',
+    oneLiner: 'Defines fiscal periods, comparison windows, and comparable slots.',
+    outputs: ['period_type', 'comparison_side', 'comparable_week_slot', 'comparison_window_id']
+  },
+  {
+    id: LAYER_STAGE_IDS.trading,
+    num: 2,
+    title: 'Trading Expectation',
+    subtitle: 'Operational Truth',
+    icon: 'T',
+    color: '#5ad6a8',
+    borderColor: 'rgba(90,214,168,0.5)',
+    bgColor: 'rgba(90,214,168,0.08)',
+    question: 'Was this store expected to be trading during this week?',
+    oneLiner: 'Determines whether a store should have been operating during a given week.',
+    outputs: ['system_include_flag', 'system_reason_code']
+  },
+  {
+    id: LAYER_STAGE_IDS.metricCoverage,
+    num: 3,
+    title: 'Metric Coverage',
+    subtitle: 'Data Truth',
+    icon: 'M',
+    color: '#a78bfa',
+    borderColor: 'rgba(167,139,250,0.5)',
+    bgColor: 'rgba(167,139,250,0.08)',
+    question: 'Was this metric complete and valid for this store during this week?',
+    oneLiner: 'Indicates whether metric data exists for a store-metric-week.',
+    outputs: ['source_data_exists', 'source_row_count', 'source_value']
+  },
+  {
+    id: LAYER_STAGE_IDS.comparableCoverage,
+    num: 4,
+    title: 'Comparable Coverage',
+    subtitle: 'Comparability Truth',
+    icon: '★',
+    color: '#f5b971',
+    borderColor: 'rgba(245,185,113,0.5)',
+    bgColor: 'rgba(245,185,113,0.08)',
+    question: 'Is it valid to compare this store and metric across the selected time range?',
+    oneLiner: 'Combines trading expectation, overrides, and slot completeness into final LFL inclusion.',
+    outputs: ['manual_include_flag', 'paired_slot_include_flag', 'final_include_flag', 'mask_include_flag', 'final_reason_code']
+  },
+  {
+    id: LAYER_STAGE_IDS.presentation,
+    num: 5,
+    title: 'Dashboards & Consumption',
+    subtitle: 'Presentation',
+    icon: 'D',
+    color: '#ef6b75',
+    borderColor: 'rgba(239,107,117,0.5)',
+    bgColor: 'rgba(239,107,117,0.08)',
+    question: 'How do users interact with the governed dataset?',
+    oneLiner: 'Consumes the CCM mask via LFL ON/OFF filters for dashboard reporting.',
+    outputs: ['L4L ON: mask_include_flag = Y', 'L4L OFF: inclusive view']
+  }
+];
+
 export const SOURCE_REQUIRED_FIELDS = [
   'Date',
   'Week Ending',
