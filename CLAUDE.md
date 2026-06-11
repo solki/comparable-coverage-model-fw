@@ -18,6 +18,7 @@ npm test              # Run all tests (Node.js native runner)
 npm run build         # vite build + copy Domo assets
 npm run dev           # Vite dev server on 127.0.0.1
 npm run preview       # Vite preview server
+npm run test:e2e      # Playwright e2e tests
 ```
 
 There is no lint script. To run a single test file:
@@ -25,6 +26,25 @@ There is no lint script. To run a single test file:
 ```bash
 node --test tests/maskGenerator.test.js
 ```
+
+## Domo Skills (installed via `npx skills`)
+
+The following Domo agent skills are available for Domo platform operations. Invoke them via the `Skill` tool when needed:
+
+| Skill | Use for |
+|---|---|
+| `basic-custom-app-build` | Orchestration: sequences sub-skills for new builds |
+| `publish` | `npm run build && domo publish` flow |
+| `domo-js` | ryuu.js DOM interactions, navigation, events |
+| `appdb` | AppDB CRUD — reading/writing `ccm_metric_week_overrides`, `ccm_selected_scope_mask`, etc. |
+| `dataset-query` | Querying `sourceMetrics` and `l4lComparisonFact` dataset aliases |
+| `toolkit` | `domo.postgres()` and other Domo toolkit APIs |
+| `manifest` | manifest.json validation and updates |
+| `workflow` | Triggering `prepareL4LFacts` workflow and polling status |
+| `da-cli` | DA CLI scaffolding and manifest instance workflows |
+| `domo-app-theme` | UI theme reference and design tokens |
+
+**Important**: Never run `domo publish` without explicit user approval. AppDB writes are limited to approved project collections.
 
 ## Architecture
 

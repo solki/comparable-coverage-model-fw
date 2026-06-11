@@ -116,7 +116,18 @@ export function createApp(root) {
     stepCompletion: {
       mask: Boolean(persistedUiState.stepCompletion?.mask)
     },
-    validationSummary: persistedUiState.validationSummary || null
+    validationSummary: persistedUiState.validationSummary || null,
+    workingScope: {
+      status: 'idle',
+      maskPreviewRows: [],
+      maskRowCount: 0,
+      includedCount: 0,
+      excludedCount: 0,
+      loadedAt: '',
+      storeCodes: '',
+      metrics: ''
+    },
+    persistedMaskStatus: 'not_written'
   };
 
   installFormSubmitGuard();
@@ -259,11 +270,18 @@ export function createApp(root) {
 
   function renderStaleDataBanner() {
     if (!state.scopeDirty) return '';
+    const ws = state.workingScope;
+    const statusText = ws.status === 'ready'
+      ? `Working data loaded: ${ws.maskRowCount} comparable week rows (${ws.includedCount} included, ${ws.excludedCount} excluded).`
+      : ws.status === 'loading'
+        ? 'Loading working data...'
+        : 'Working data not yet computed.';
     return `
       <section class="stale-data-banner" role="status" aria-live="polite">
         <div>
-          <strong>Scope changed.</strong>
-          Existing mask and L4L result context no longer match the current scope. Rebuild the mask below.
+          <strong>Persisted mask is stale.</strong>
+          ${escapeHtml(statusText)}
+          Navigate to Stage 4 to commit the updated mask to AppDB.
         </div>
         <button type="button" class="primary compact" data-action="generate-mask">Rebuild Selected Scope Mask</button>
       </section>
@@ -1782,21 +1800,32 @@ export function createApp(root) {
 
     const runId = createRunId();
     const generatedAt = new Date().toISOString();
-    const stores = selectedStores();
     const store = selectedStore();
+    const stores = selectedStores();
     const metrics = selectedMetricList();
-    const generationPeriodRows = allPeriodRowsForGeneration();
     const scopeSummary = selectedScopeSummary();
-    const maskRows = generateMaskRows({
-      stores,
-      metrics,
-      periodRows: generationPeriodRows,
-      manualOverrides: state.manualOverrides,
-      runId,
-      generatedAt,
-      generationMode: 'SELECTED_SCOPE',
-      outputCollection: COLLECTIONS.selectedScopeMask
-    });
+
+    // Use cached working scope data if available, otherwise generate fresh
+    let maskRows;
+    if (state.workingScope.status === 'ready' && state.workingScope.maskPreviewRows.length) {
+      maskRows = state.workingScope.maskPreviewRows.map((row) => ({
+        ...row,
+        id: row.id.replace(/^working_/, `${runId}_`),
+        run_id: runId,
+        generated_at: generatedAt
+      }));
+    } else {
+      maskRows = generateMaskRows({
+        stores,
+        metrics,
+        periodRows: allPeriodRowsForGeneration(),
+        manualOverrides: state.manualOverrides,
+        runId,
+        generatedAt,
+        generationMode: 'SELECTED_SCOPE',
+        outputCollection: COLLECTIONS.selectedScopeMask
+      });
+    }
     const runRecord = buildRunRecord({
       runId,
       startedAt: generatedAt,
@@ -1944,11 +1973,12 @@ export function createApp(root) {
     state.pendingWrite = null;
     invalidateScopeCache();
     state.loading = true;
-    state.status = 'Loading manual coverage adjustments for selected Store and Metric...';
+    state.status = 'Loading working data for selected scope...';
     render();
 
     try {
       state.manualOverrides = await loadOverridesForSelection();
+      await ensureWorkingScopeLoaded();
       state.status = `Loaded manual coverage adjustments for ${selectedStoreDisplay()} / ${selectedMetricDisplay()}.`;
       state.error = '';
     } catch (error) {
@@ -1966,6 +1996,7 @@ export function createApp(root) {
     if (!hasGeneratedContext) return;
 
     state.scopeDirty = true;
+    state.persistedMaskStatus = 'stale';
     // Do NOT auto-navigate — user stays on current stage
     state.stepCompletion.mask = false;
     state.stepAcknowledged.mask = false;
@@ -2360,6 +2391,58 @@ export function createApp(root) {
     _cachedSummary = null;
     _cachedReviewRows = null;
     _cacheKey = '';
+    state.workingScope.status = 'stale';
+  }
+
+  function workingScopeKey() {
+    return [
+      selectedStoreValueForRun(),
+      selectedMetricValueForRun(),
+      state.periodRows.length,
+      state.sourceRows.length,
+      state.manualOverrides.length
+    ].join('|');
+  }
+
+  async function ensureWorkingScopeLoaded() {
+    const key = workingScopeKey();
+    if (state.workingScope.status === 'ready' && state.workingScope._key === key) return;
+    if (state.workingScope.status === 'loading') return;
+
+    state.workingScope.status = 'loading';
+    state.workingScope._key = key;
+    render();
+
+    try {
+      const periodRows = allPeriodRowsForGeneration();
+      const maskRows = generateMaskRows({
+        stores: selectedStores(),
+        metrics: selectedMetricList(),
+        periodRows,
+        manualOverrides: state.manualOverrides,
+        runId: 'working',
+        generatedAt: new Date().toISOString(),
+        generationMode: 'SELECTED_SCOPE',
+        outputCollection: COLLECTIONS.selectedScopeMask
+      });
+
+      state.workingScope = {
+        status: 'ready',
+        _key: key,
+        maskPreviewRows: maskRows,
+        maskRowCount: maskRows.length,
+        includedCount: maskRows.filter((r) => r.mask_include_flag === FLAGS.yes).length,
+        excludedCount: maskRows.filter((r) => r.mask_include_flag === FLAGS.no).length,
+        loadedAt: new Date().toISOString(),
+        storeCodes: selectedStoreValueForRun(),
+        metrics: selectedMetricValueForRun()
+      };
+    } catch (err) {
+      state.workingScope.status = 'error';
+      console.warn('Working scope load failed:', err);
+    }
+    state.loading = false;
+    render();
   }
 
   function selectedScopeSummary() {
