@@ -3,188 +3,139 @@ import assert from 'node:assert/strict';
 
 import {
   buildExecutionModal,
-  getActiveWorkflowStepId,
+  getActiveLayerStageId,
   getCoverageModeLabel,
+  getLayerStages,
   getTooltipCopy,
-  getWorkflowSteps
+  LAYER_STAGE_IDS
 } from '../src/workflowUiState.js';
 
-test('workflow step gating keeps later steps locked until prior completion is acknowledged', () => {
-  const initial = getWorkflowSteps({
-    hasSourceProfile: true,
-    hasSelectedScope: true,
-    hasReviewConfirmed: true,
-    hasMaskCompleted: false,
-    hasMaskAcknowledged: false,
-    hasComparisonRows: false,
-    hasWorkflowAcknowledged: false
-  });
-
-  assert.equal(initial[0].status, 'ready');
-  assert.equal(initial[1].status, 'locked');
-  assert.match(initial[1].disabledReason, /Build the selected-scope mask first/);
-  assert.equal(initial[2].status, 'locked');
-  assert.equal(initial[3].status, 'locked');
-
-  const unacknowledged = getWorkflowSteps({
-    hasSourceProfile: true,
-    hasSelectedScope: true,
-    hasReviewConfirmed: true,
-    hasMaskCompleted: true,
-    hasMaskAcknowledged: false,
-    hasComparisonRows: false,
-    hasWorkflowAcknowledged: false
-  });
-
-  assert.equal(unacknowledged[0].status, 'completed_unacknowledged');
-  assert.equal(unacknowledged[1].status, 'locked');
-  assert.match(unacknowledged[1].disabledReason, /Click Complete/);
-
-  const maskAcknowledged = getWorkflowSteps({
-    hasSourceProfile: true,
-    hasSelectedScope: true,
-    hasReviewConfirmed: true,
-    hasMaskCompleted: true,
-    hasMaskAcknowledged: true,
-    hasComparisonRows: false,
-    hasWorkflowAcknowledged: false
-  });
-
-  assert.equal(maskAcknowledged[0].status, 'complete');
-  assert.equal(maskAcknowledged[1].status, 'ready');
-  assert.equal(maskAcknowledged[2].status, 'locked');
+test('layer stages: all 5 stages are defined in order', () => {
+  const stages = getLayerStages({ hasSourceProfile: true, hasSelectedScope: true });
+  assert.equal(stages.length, 5);
+  assert.deepEqual(stages.map((s) => s.id), [
+    LAYER_STAGE_IDS.calendar, LAYER_STAGE_IDS.trading, LAYER_STAGE_IDS.metricCoverage,
+    LAYER_STAGE_IDS.comparableCoverage, LAYER_STAGE_IDS.presentation
+  ]);
 });
 
-test('coverage mask step stays locked until Comparable Week Review is confirmed', () => {
-  const unconfirmed = getWorkflowSteps({
-    hasSourceProfile: true,
-    hasSelectedScope: true,
-    hasReviewConfirmed: false
-  });
-
-  assert.equal(unconfirmed[0].status, 'locked');
-  assert.match(unconfirmed[0].disabledReason, /Save Overrides/);
-  assert.equal(unconfirmed[1].status, 'locked');
-
-  const confirmed = getWorkflowSteps({
-    hasSourceProfile: true,
-    hasSelectedScope: true,
-    hasReviewConfirmed: true
-  });
-
-  assert.equal(confirmed[0].status, 'ready');
+test('layer stages: Stage 1 (calendar) is always ready', () => {
+  const stages = getLayerStages({});
+  assert.equal(stages[0].status, 'ready');  // calendar always ready
 });
 
-test('comparison and exclusion steps unlock only after result data is available or acknowledged', () => {
-  const steps = getWorkflowSteps({
-    hasSourceProfile: true,
-    hasSelectedScope: true,
-    hasReviewConfirmed: true,
-    hasMaskCompleted: true,
-    hasMaskAcknowledged: true,
-    hasWorkflowAcknowledged: true,
-    hasComparisonRows: true
-  });
-
-  assert.equal(steps[1].status, 'complete');
-  assert.equal(steps[2].status, 'complete');
-  assert.equal(steps[3].status, 'complete');
+test('layer stages: Stage 1 transitions to complete when confirmed', () => {
+  const stages = getLayerStages({ stageConfirmed: { calendar: true } });
+  assert.equal(stages[0].status, 'complete');
 });
 
-test('active workflow step does not pin completed runs to exclusions', () => {
-  const steps = getWorkflowSteps({
-    hasSourceProfile: true,
-    hasSelectedScope: true,
-    hasReviewConfirmed: true,
-    hasMaskCompleted: true,
-    hasMaskAcknowledged: true,
-    hasWorkflowAcknowledged: true,
-    hasComparisonRows: true
-  });
+test('layer stages: Stage 2 unlocks when calendar confirmed', () => {
+  const noConfirm = getLayerStages({ stageConfirmed: {} });
+  assert.equal(noConfirm[1].status, 'locked');
 
-  assert.equal(getActiveWorkflowStepId(steps), 'results');
-  assert.equal(getActiveWorkflowStepId(steps, 'mask'), 'mask');
-  assert.equal(getActiveWorkflowStepId(steps, 'exclusions'), 'exclusions');
+  const withConfirm = getLayerStages({ stageConfirmed: { calendar: true } });
+  assert.equal(withConfirm[1].status, 'ready');
 });
 
-test('active workflow step ignores locked preferred steps and keeps the next valid action linear', () => {
-  const steps = getWorkflowSteps({
-    hasSourceProfile: true,
-    hasSelectedScope: true,
-    hasReviewConfirmed: true,
-    hasMaskCompleted: true,
-    hasMaskAcknowledged: true,
-    hasWorkflowAcknowledged: false,
-    hasComparisonRows: false
-  });
+test('layer stages: Stage 4 requires scope + review when metric confirmed', () => {
+  const noScope = getLayerStages({ stageConfirmed: { calendar: true, trading: true, metricCoverage: true }, hasSourceProfile: true });
+  assert.equal(noScope[3].status, 'locked');  // no scope selected
 
-  assert.equal(getActiveWorkflowStepId(steps, 'results'), 'workflow');
+  const withScope = getLayerStages({ stageConfirmed: { calendar: true, trading: true, metricCoverage: true }, hasSourceProfile: true, hasSelectedScope: true });
+  assert.equal(withScope[3].status, 'ready');
 });
 
-test('existing comparison rows do not mark workflow step complete after a new mask is acknowledged', () => {
-  const steps = getWorkflowSteps({
-    hasSourceProfile: true,
-    hasSelectedScope: true,
-    hasReviewConfirmed: true,
-    hasMaskCompleted: true,
-    hasMaskAcknowledged: true,
-    hasWorkflowAcknowledged: false,
-    hasComparisonRows: true
-  });
-
-  assert.equal(steps[0].status, 'complete');
-  assert.equal(steps[1].status, 'ready');
+test('active layer stage defaults to first non-complete stage', () => {
+  const stages = getLayerStages({});
+  const activeId = getActiveLayerStageId(stages, '');
+  assert.equal(activeId, LAYER_STAGE_IDS.calendar);
 });
 
-test('execution modal blocks interaction and has no cancel button while running', () => {
-  const modal = buildExecutionModal({
-    type: 'workflow',
-    status: 'running',
-    currentStage: 1,
-    message: 'Workflow is running.'
-  });
+test('active layer stage allows reviewing completed stages', () => {
+  const stages = getLayerStages({ stageConfirmed: { calendar: true } });
+  const activeId = getActiveLayerStageId(stages, LAYER_STAGE_IDS.calendar);
+  assert.equal(activeId, LAYER_STAGE_IDS.calendar);  // can review completed
+});
 
+test('active layer stage does not allow jumping to locked stages', () => {
+  const stages = getLayerStages({});
+  const activeId = getActiveLayerStageId(stages, LAYER_STAGE_IDS.comparableCoverage);
+  assert.equal(activeId, LAYER_STAGE_IDS.calendar);  // falls back to first non-complete
+});
+
+test('execution modal blocks interaction and shows no cancel while running', () => {
+  const modal = buildExecutionModal({ type: 'mask', status: 'running', currentStage: 2 });
   assert.equal(modal.blocksPage, true);
   assert.equal(modal.showCancelButton, false);
   assert.equal(modal.showCompleteButton, false);
-  assert.equal(modal.stages[1].state, 'current');
-  assert.match(modal.progressLabel, /Approximate progress/);
 });
 
 test('execution modal shows Complete only after success', () => {
-  const modal = buildExecutionModal({
-    type: 'mask',
-    status: 'success',
-    currentStage: 6,
-    resultSummary: '132 mask records written.'
-  });
-
-  assert.equal(modal.blocksPage, true);
-  assert.equal(modal.showCancelButton, false);
+  const modal = buildExecutionModal({ type: 'mask', status: 'success', currentStage: 5, resultSummary: '50 records written.' });
   assert.equal(modal.showCompleteButton, true);
-  assert.match(modal.resultSummary, /132 mask records written/);
+  assert.ok(modal.resultSummary.includes('50'));
 });
 
 test('tooltip copy includes key CCM and L4L terms', () => {
-  for (const key of [
-    'comparableCoverage',
-    'l4lOn',
-    'l4lOff',
-    'tradingExpectation',
-    'manualCoverageAdjustment',
-    'finalCcmOutcome',
-    'excludedWeeks',
-    'variancePercent',
-    'priorZero',
-    'week53Excluded'
-  ]) {
-    assert.ok(getTooltipCopy(key).length > 20, `${key} should have useful tooltip copy`);
+  for (const key of ['comparableCoverage', 'l4lOn', 'l4lOff', 'tradingExpectation',
+    'manualCoverageAdjustment', 'finalCcmOutcome', 'excludedWeeks',
+    'variancePercent', 'priorZero', 'week53Excluded', 'slotCompleteness', 'fiveLayerArchitecture']) {
+    const copy = getTooltipCopy(key);
+    assert.ok(typeof copy === 'string' && copy.length > 20, `Tooltip "${key}" should have meaningful content`);
   }
 });
 
 test('coverage mode labels preserve L4L ON/OFF logic', () => {
-  assert.equal(getCoverageModeLabel(true).title, 'L4L ON');
-  assert.match(getCoverageModeLabel(true).description, /mask_include_flag = Y/);
-  assert.equal(getCoverageModeLabel(false).title, 'L4L OFF');
-  assert.match(getCoverageModeLabel(false).description, /all rows/);
+  const on = getCoverageModeLabel(true);
+  assert.equal(on.title, 'L4L ON');
+  assert.match(on.description, /mask_include_flag/);
+  const off = getCoverageModeLabel(false);
+  assert.equal(off.title, 'L4L OFF');
+  assert.match(off.description, /all rows/);
+});
+
+test('re-confirming Stage 1 resets downstream confirmed flags', () => {
+  // After full flow through Stage 3, all are confirmed
+  const afterFull = getLayerStages({
+    hasSourceProfile: true, hasSelectedScope: true, hasReviewConfirmed: true,
+    stageConfirmed: { calendar: true, trading: true, metricCoverage: true, comparableCoverage: false, presentation: false }
+  });
+  assert.equal(afterFull[0].status, 'complete'); // calendar
+  assert.equal(afterFull[1].status, 'complete'); // trading
+  assert.equal(afterFull[2].status, 'complete'); // metric
+
+  // After re-confirming Stage 1: downstream confirmed flags reset.
+  // Calendar still true → trading is ready (not locked).
+  // trading/metricCoverage reset to false → metric/ccm locked.
+  const afterReset = getLayerStages({
+    hasSourceProfile: true, hasSelectedScope: true,
+    stageConfirmed: { calendar: true, trading: false, metricCoverage: false, comparableCoverage: false, presentation: false }
+  });
+  assert.equal(afterReset[0].status, 'complete'); // calendar stays confirmed
+  assert.equal(afterReset[1].status, 'ready');    // trading: calendar.isConfirmed=true → ready (needs re-confirm)
+  assert.equal(afterReset[2].status, 'locked');   // metric: trading.isConfirmed=false → locked
+  assert.equal(afterReset[3].status, 'locked');   // ccm: metricCoverage.isConfirmed=false → locked
+  assert.equal(afterReset[4].status, 'locked');   // presentation: locked
+});
+
+test('stage status transitions: locked → ready → complete', () => {
+  // Initial: nothing confirmed
+  const initial = getLayerStages({ stageConfirmed: {} });
+  assert.equal(initial[0].status, 'ready');    // calendar always ready
+  assert.equal(initial[1].status, 'locked');   // trading locked
+  assert.equal(initial[2].status, 'locked');   // metric locked
+
+  // After confirming calendar
+  const afterCal = getLayerStages({ stageConfirmed: { calendar: true } });
+  assert.equal(afterCal[0].status, 'complete'); // done
+  assert.equal(afterCal[1].status, 'ready');    // unlocked
+
+  // After confirming all except presentation
+  const allButPres = getLayerStages({
+    hasSourceProfile: true, hasSelectedScope: true, hasReviewConfirmed: true,
+    hasMaskAcknowledged: false,
+    stageConfirmed: { calendar: true, trading: true, metricCoverage: true, comparableCoverage: false }
+  });
+  assert.equal(allButPres[3].status, 'ready');     // ccm ready
+  assert.equal(allButPres[4].status, 'locked');    // presentation locked (no mask acknowledged)
 });

@@ -63,7 +63,7 @@ export function computeSelectedScopeSummary({
   const factWeeks = new Set(scopedFacts.map((fact) => normalizeDate(fact.week_ending)).filter(Boolean));
 
   return {
-    selected_period_type: selectedPeriodType || '',
+    selected_period_type: selectedPeriodType || 'All 6 types',
     scoped_source_row_count: sumSourceRowCounts(scopedFacts),
     scoped_store_count: storeCodes.length,
     scoped_metric_count: selectedMetricList.length,
@@ -85,7 +85,9 @@ export function computeSelectedScopeSummary({
     }),
     system_excluded_week_count: scopedMaskRows.filter((row) => row.system_include_flag === FLAGS.no).length,
     final_included_rows: scopedMaskRows.filter((row) => finalIncludeFlag(row) === FLAGS.yes).length,
-    final_excluded_rows: scopedMaskRows.filter((row) => finalIncludeFlag(row) === FLAGS.no).length
+    final_excluded_rows: scopedMaskRows.filter((row) => finalIncludeFlag(row) === FLAGS.no).length,
+    comparableWeekTotal: (scopedMaskRows.filter((row) => finalIncludeFlag(row) === FLAGS.yes).length +
+                         scopedMaskRows.filter((row) => finalIncludeFlag(row) === FLAGS.no).length)
   };
 }
 

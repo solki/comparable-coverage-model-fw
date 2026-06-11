@@ -18,13 +18,6 @@
       "fields": []
     }
   ],
-  "workflowMapping": [
-    {
-      "alias": "prepareL4LFacts",
-      "modelId": "55d72677-b9db-440a-967f-de606fad0a0c",
-      "parameters": []
-    }
-  ],
   "packagesMapping": [],
   "fileName": "manifest.json",
   "collectionsMapping": [

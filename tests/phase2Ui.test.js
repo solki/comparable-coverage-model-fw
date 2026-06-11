@@ -66,8 +66,8 @@ test('redesigned UI renders guided workflow, diagnostics drawer, tooltips, and e
     'renderCommandHeader',
     'renderScopeBar',
     'renderNextActionStrip',
-    'renderWorkflowRail',
-    'renderActiveStepWorkspace',
+    'renderLayerNavigator',
+    'renderActiveLayerWorkspace',
     'renderDiagnosticsDrawer',
     'renderInfoTooltip',
     'renderExecutionModal',
@@ -89,7 +89,7 @@ test('HCI redesign exposes command center, active workspace, result board, and e
     'Command Center',
     'Next best action',
     'Scope changed',
-    'active-step-workspace',
+    'layer-workspace',
     'Result Board',
     'comparison-scorecards',
     'Evidence',
@@ -108,8 +108,8 @@ test('HCI redesign exposes command center, active workspace, result board, and e
     '.command-header',
     '.scope-bar',
     '.next-action-strip',
-    '.workflow-rail',
-    '.active-step-workspace',
+    '.layer-navigator',
+    '.layer-workspace',
     '.result-board',
     '.comparison-scorecards',
     '.evidence-tabs',
@@ -133,12 +133,12 @@ test('HCI redesign improves completion acknowledgement and manual workflow fallb
 test('workflow UI supports repeat runs without pinning users to the final evidence step', () => {
   const uiSource = readFileSync('src/ui.js', 'utf8');
 
-  assert.match(uiSource, /activeStepId/);
-  assert.match(uiSource, /data-action="open-workflow-step"/);
+  assert.match(uiSource, /activeLayerId/);
+  assert.match(uiSource, /data-action="open-layer-stage"/);
   assert.match(uiSource, /data-action="start-new-run"/);
   assert.match(uiSource, /Start New Run/);
-  assert.match(uiSource, /Change Store \/ Metric \/ Period/);
-  assert.match(uiSource, /state\.activeStepId = 'mask'/);
+  assert.match(uiSource, /Change Store/);
+  assert.match(uiSource, /LAYER_STAGE_IDS\.comparableCoverage/);
   assert.match(uiSource, /state\.reviewConfirmed = false/);
 });
 
@@ -215,15 +215,19 @@ test('Build Coverage Mask is gated until Comparable Week Review is saved', () =>
   assert.match(uiSource, /!state\.reviewConfirmed/);
 });
 
-test('active UI exposes only Period Lens and hides Compare Against and History Window controls', () => {
+test('selection panel exposes Store and Metric only — no Period selector or compare controls', () => {
   const uiSource = readFileSync('src/ui.js', 'utf8');
   const selectionBlock = uiSource.slice(
     uiSource.indexOf('function renderSelectionControls'),
     uiSource.indexOf('function renderSelectedScopeSummary')
   );
 
-  assert.match(selectionBlock, /data-action="select-period-type"/);
-  assert.match(selectionBlock, /Fixed comparison/);
+  // Store and Metric are the only selection controls
+  assert.match(selectionBlock, /data-action="select-store"/);
+  assert.match(selectionBlock, /data-action="select-metrics"/);
+  // Period types are now shown as a read-only dropdown in the scope bar, not in Selection
+  assert.doesNotMatch(selectionBlock, /Period Filter/);
+  // These controls must not exist
   assert.doesNotMatch(selectionBlock, /Compare Against/);
   assert.doesNotMatch(selectionBlock, /History Window/);
   assert.doesNotMatch(selectionBlock, /data-action="select-compare-against"/);

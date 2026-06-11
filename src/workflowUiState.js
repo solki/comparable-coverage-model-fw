@@ -1,9 +1,6 @@
-export const WORKFLOW_STEP_IDS = {
-  mask: 'mask',
-  workflow: 'workflow',
-  results: 'results',
-  exclusions: 'exclusions'
-};
+import { LAYER_STAGE_IDS, LAYER_CONFIG } from './constants.js';
+
+export { LAYER_STAGE_IDS, LAYER_CONFIG };
 
 export const TOOLTIP_COPY = {
   comparableCoverage: 'Comparable Coverage keeps only weeks that are fair to compare for the selected Store, Metric, and Period Lens.',
@@ -23,7 +20,14 @@ export const TOOLTIP_COPY = {
   fiveLayerArchitecture: 'The CCM system follows a five-layer architecture: (1) Calendar — defines fiscal periods and comparable slots, (2) Trading Expectation — store expected-to-trade status, (3) Metric Coverage — data existence and quality, (4) Comparable Coverage — final LFL inclusion after rules and overrides, (5) Presentation — dashboard consumption with LFL ON/OFF.'
 };
 
-export function getWorkflowSteps({
+export function getLayerConfig(id) {
+  return LAYER_CONFIG.find((layer) => layer.id === id) || LAYER_CONFIG[0];
+}
+
+/**
+ * Returns the 5 layer stages with their current status based on app state.
+ */
+export function getLayerStages({
   hasSourceProfile = false,
   hasSelectedScope = false,
   hasReviewConfirmed = false,
@@ -33,85 +37,73 @@ export function getWorkflowSteps({
   hasWorkflowAcknowledged = false,
   hasMaskError = false,
   hasWorkflowError = false,
-  hasComparisonError = false
+  hasComparisonError = false,
+  stageConfirmed = {}
 } = {}) {
-  const maskReady = hasSourceProfile && hasSelectedScope && hasReviewConfirmed;
-  const maskStatus = getMaskStatus({ maskReady, hasMaskCompleted, hasMaskAcknowledged, hasMaskError });
-  const workflowStatus = getWorkflowStatus({
-    hasMaskCompleted,
-    hasMaskAcknowledged,
-    hasWorkflowAcknowledged,
-    hasWorkflowError
-  });
-  const resultsStatus = getResultsStatus({
-    hasMaskAcknowledged,
-    hasComparisonRows,
-    hasWorkflowAcknowledged,
-    hasComparisonError
-  });
-  const exclusionsStatus = hasComparisonRows ? 'complete' : 'locked';
+  const sc = stageConfirmed || {};
+
+  // Linear gating: each stage unlocks only when the previous stage is confirmed.
+  const calendarReady = true; // Stage 1 is always accessible
+  const tradingReady = Boolean(sc.calendar);
+  const metricReady = Boolean(sc.trading);
+  const ccmReady = Boolean(sc.metricCoverage) && hasSourceProfile && hasSelectedScope;
+  const presentationReady = Boolean(sc.comparableCoverage) && hasMaskAcknowledged;
 
   return [
     {
-      id: WORKFLOW_STEP_IDS.mask,
-      number: 1,
-      title: 'Build Coverage Mask',
-      layer: 'Comparability Truth',
-      status: maskStatus,
-      disabledReason: maskReady ? '' : maskDisabledReason({ hasSourceProfile, hasSelectedScope, hasReviewConfirmed }),
-      help: TOOLTIP_COPY.comparableCoverage
+      ...LAYER_CONFIG[0],
+      status: getStageStatus(sc.calendar, calendarReady),
+      disabledReason: 'The first stage. Confirm to proceed to Trading Expectation.'
     },
     {
-      id: WORKFLOW_STEP_IDS.workflow,
-      number: 2,
-      title: 'Prepare Comparison Facts',
-      layer: 'Presentation',
-      status: workflowStatus,
-      disabledReason: workflowDisabledReason({ hasMaskCompleted, hasMaskAcknowledged }),
-      help: TOOLTIP_COPY.workflowAlias
+      ...LAYER_CONFIG[1],
+      status: getStageStatus(sc.trading, tradingReady),
+      disabledReason: tradingReady ? '' : 'Confirm Calendar Layer (Stage 1) first.'
     },
     {
-      id: WORKFLOW_STEP_IDS.results,
-      number: 3,
-      title: 'Review L4L Results',
-      layer: 'Presentation',
-      status: resultsStatus,
-      disabledReason: hasWorkflowAcknowledged || hasComparisonRows
-        ? ''
-        : 'Prepare comparison facts first, then refresh the result dataset.',
-      help: 'Review L4L ON and L4L OFF values side by side.'
+      ...LAYER_CONFIG[2],
+      status: getStageStatus(sc.metricCoverage, metricReady),
+      disabledReason: metricReady ? '' : 'Confirm Trading Expectation (Stage 2) first.'
     },
     {
-      id: WORKFLOW_STEP_IDS.exclusions,
-      number: 4,
-      title: 'Explain Excluded Weeks',
-      layer: 'Comparability Truth',
-      status: exclusionsStatus,
-      disabledReason: hasComparisonRows ? '' : 'Load L4L comparison results first. Excluded weeks are derived from the result dataset.',
-      help: TOOLTIP_COPY.excludedWeeks
+      ...LAYER_CONFIG[3],
+      status: getStageStatus(sc.comparableCoverage, ccmReady),
+      disabledReason: ccmReady
+        ? (hasReviewConfirmed ? '' : 'Save Overrides to confirm Comparable Week Review.')
+        : 'Confirm Metric Coverage (Stage 3) first.'
+    },
+    {
+      ...LAYER_CONFIG[4],
+      status: getStageStatus(sc.presentation, presentationReady),
+      disabledReason: presentationReady
+        ? (hasComparisonRows ? '' : 'Refresh L4L results to complete.')
+        : 'Complete the mask build (Stage 4) first.'
     }
   ];
 }
 
-export function getActiveWorkflowStepId(steps = [], preferredStepId = '') {
-  const preferredStep = steps.find((step) => step.id === preferredStepId);
-  if (preferredStep && preferredStep.status !== 'locked') return preferredStep.id;
-
-  const actionableStep = steps.find((step) => ['ready', 'error', 'completed_unacknowledged'].includes(step.status));
-  if (actionableStep) return actionableStep.id;
-
-  const allComplete = steps.length > 0 && steps.every((step) => step.status === 'complete');
-  if (allComplete && steps.some((step) => step.id === WORKFLOW_STEP_IDS.results)) {
-    return WORKFLOW_STEP_IDS.results;
-  }
-
-  return (steps.find((step) => step.status === 'locked') || steps[steps.length - 1])?.id || WORKFLOW_STEP_IDS.mask;
+function getStageStatus(confirmed, isReady) {
+  if (confirmed) return 'complete';
+  if (isReady) return 'ready';
+  return 'locked';
 }
 
-function maskDisabledReason({ hasSourceProfile, hasSelectedScope, hasReviewConfirmed }) {
-  if (!hasSourceProfile || !hasSelectedScope) return 'Load source data and select Store, Metric, and Period Lens first.';
-  if (!hasReviewConfirmed) return 'Save Overrides to confirm Comparable Week Review before building the selected-scope mask.';
-  return '';
+/**
+ * Returns the currently active layer stage ID.
+ */
+export function getActiveLayerStageId(stages = [], preferredStageId = '') {
+  // Allow reviewing completed stages.
+  const preferred = stages.find((stage) => stage.id === preferredStageId);
+  if (preferred && preferred.status === 'complete') return preferred.id;
+
+  // Allow navigating to the current ready stage.
+  if (preferred && preferred.status === 'ready') return preferred.id;
+
+  // Default: first non-complete stage (the next step in the linear flow).
+  const firstIncomplete = stages.find((s) => s.status !== 'complete');
+  if (firstIncomplete) return firstIncomplete.id;
+
+  return stages[stages.length - 1]?.id || LAYER_STAGE_IDS.calendar;
 }
 
 export function buildExecutionModal({
@@ -156,16 +148,9 @@ export function executionStages(type) {
       'Completed'
     ];
   }
-
   if (type === 'refresh') {
-    return [
-      'Querying l4lComparisonFact alias',
-      'Validating comparison fields',
-      'Calculating L4L ON/OFF summaries',
-      'Completed'
-    ];
+    return ['Querying l4lComparisonFact alias', 'Validating comparison fields', 'Calculating L4L ON/OFF summaries', 'Completed'];
   }
-
   return [
     'Validating selected scope',
     'Generating comparable week mask',
@@ -182,60 +167,31 @@ export function getTooltipCopy(key) {
 
 export function getCoverageModeLabel(comparableCoverageOn) {
   if (comparableCoverageOn) {
-    return {
-      title: 'L4L ON',
-      description: 'Comparable Coverage ON: filters to rows where mask_include_flag = Y.'
-    };
+    return { title: 'L4L ON', description: 'Comparable Coverage ON: filters to rows where mask_include_flag = Y.' };
   }
-
-  return {
-    title: 'L4L OFF',
-    description: 'Comparable Coverage OFF: uses all rows in the comparison window.'
-  };
+  return { title: 'L4L OFF', description: 'Comparable Coverage OFF: uses all rows in the comparison window.' };
 }
 
-function getMaskStatus({ maskReady, hasMaskCompleted, hasMaskAcknowledged, hasMaskError }) {
+// ── Internal helpers ──────────────────────────────────────────────
+
+function getCcmStatus({ ccmMaskReady, hasMaskCompleted, hasMaskAcknowledged, hasMaskError }) {
   if (hasMaskError) return 'error';
   if (hasMaskCompleted && hasMaskAcknowledged) return 'complete';
   if (hasMaskCompleted) return 'completed_unacknowledged';
-  return maskReady ? 'ready' : 'locked';
+  return ccmMaskReady ? 'ready' : 'locked';
 }
 
-function getWorkflowStatus({
-  hasMaskCompleted,
-  hasMaskAcknowledged,
-  hasWorkflowAcknowledged,
-  hasWorkflowError
-}) {
-  if (hasWorkflowError) return 'error';
-  if (hasWorkflowAcknowledged) return 'complete';
-  if (hasMaskCompleted && hasMaskAcknowledged) return 'ready';
-  return 'locked';
-}
-
-function getResultsStatus({
-  hasComparisonRows,
-  hasWorkflowAcknowledged,
-  hasComparisonError
-}) {
+function getPresentationStatus({ hasMaskAcknowledged, hasComparisonRows, hasWorkflowAcknowledged, hasComparisonError }) {
   if (hasComparisonError) return 'error';
   if (hasComparisonRows) return 'complete';
-  if (hasWorkflowAcknowledged) return 'ready';
+  if (hasWorkflowAcknowledged || hasMaskAcknowledged) return 'ready';
   return 'locked';
-}
-
-function workflowDisabledReason({ hasMaskCompleted, hasMaskAcknowledged }) {
-  if (!hasMaskCompleted) return 'Build the selected-scope mask first. The Workflow uses that output to prepare comparison facts.';
-  if (!hasMaskAcknowledged) return 'Click Complete on the mask rebuild modal before preparing comparison facts.';
-  return '';
 }
 
 function stageState({ index, currentStage, status }) {
   if (status === 'success') return 'done';
   if (status === 'error') {
-    if (index < currentStage) return 'done';
-    if (index === currentStage) return 'error';
-    return 'pending';
+    return index < currentStage ? 'done' : index === currentStage ? 'error' : 'pending';
   }
   if (index < currentStage) return 'done';
   if (index === currentStage) return 'current';
