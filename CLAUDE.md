@@ -55,18 +55,41 @@ Output: rows with `period_type`, `comparison_side` (current/prior), `comparable_
 
 **[src/periodDefinitionService.js](src/periodDefinitionService.js)** wraps period derivation with diagnostics (whether source calendar fields are present or mock data is in use).
 
-### Mask Generation Pipeline
+### Mask Generation Pipeline (Five-Layer CCM)
 
-The mask generation pipeline in **[src/maskGenerator.js](src/maskGenerator.js)** (`generateMaskRows()`) applies these steps in order:
+The mask generation pipeline in **[src/maskGenerator.js](src/maskGenerator.js)** (`generateMaskRows()`) applies layers in order:
 
-1. **System eligibility** — `evaluateStoreEligibility()` from [src/l4lEligibility.js](src/l4lEligibility.js) checks store trading commencement/closure dates against period bounds
-2. **Week 53 exclusion** — automatically excluded with reason `WEEK_53_EXCLUDED`
-3. **Manual override application** — active overrides from `ccm_metric_week_overrides` override the default `Y`
-4. **Store+Metric+Week propagation** — an excluded week is excluded everywhere it appears (rule 1)
-5. **Paired slot propagation** — within same period_type + comparable_week_slot + store + metric, if one side is excluded, both are (rule 2)
-6. **Unpaired slot exclusion** — slots existing on only one comparison side get `UNPAIRED_PERIOD_WEEK` (rule 3)
+**L1 — Calendar Layer / Time Truth**: slot completeness rule
+- Any comparable slot not on ALL required comparison sides (current AND prior) gets `UNPAIRED_PERIOD_WEEK`
+- Week 53 is a subtype: gets `WEEK_53_EXCLUDED` (excluded regardless of pairing)
+- Output: `calendar_include_flag`, `calendar_reason_code`
 
-The output grain is `period_type + comparison_side + comparable_week_slot + store_code + metric + week_ending`.
+**L2 — Trading Expectation / Operational Truth**: store eligibility
+- `evaluateStoreEligibility()` checks trading commencement/closure against period bounds
+- Trading exclusion paired propagation stays within same Period Type
+- Output: `trading_expectation_flag`, `trading_reason_code`
+
+**L3 — Metric Coverage / Data Truth**: data transparency (no auto-exclusion)
+- Default `metric_coverage_flag = Y` — no automatic metric-based exclusion
+- Source data presence tracked but does not block inclusion
+- Output: `metric_coverage_flag`, `metric_reason_code`, `source_value`, `source_row_count`, `source_data_exists`
+
+**L4 — Comparable Coverage / Comparability Truth**: manual overrides + paired propagation
+- Manual override application (Store + Metric + Week Ending, crosses period types)
+- Store+Metric+Week propagation (rule 1)
+- Paired slot propagation (within Store + Metric + Period Type + Comparable Slot, rule 2)
+- Output: `manual_include_flag`, `manual_reason`, `is_manual_override`, `paired_slot_include_flag`, `paired_slot_reason_code`, `final_include_flag`, `final_reason_code`, `mask_include_flag`
+
+**L5 — Dashboards & Consumption / Presentation**
+- LFL ON: filter `mask_include_flag = Y`
+- LFL OFF: inclusive view, no mask filter
+
+The output grain is `store_code + metric + period_type + comparison_side + comparable_week_slot + week_ending`.
+
+**Deprecated compatibility fields** (kept for backward compat, mapped from new fields):
+- `system_include_flag` ← `trading_expectation_flag`
+- `system_reason_code` ← `trading_reason_code`
+- `effective_include_flag` ← computed from L2+L3+L4
 
 ### Manual Override Model
 

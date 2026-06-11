@@ -116,6 +116,8 @@ function buildMaskRow({
     period_label_current: periodWeek.period_label_current,
     period_label_prior: periodWeek.period_label_prior,
     comparison_side: periodWeek.comparison_side,
+    comparison_mode: periodWeek.comparison_mode || '',
+    comparison_window_id: periodWeek.comparison_window_id || '',
     comparable_week_slot: periodWeek.comparable_week_slot,
     store_code: store.store_code,
     store_name: store.store_name,
@@ -125,16 +127,32 @@ function buildMaskRow({
     week_of_year: periodWeek.week_of_year,
     month_of_year: periodWeek.month_of_year,
     financial_year: periodWeek.financial_year,
-    system_include_flag: systemFlag,
+    // L1 — Calendar layer (set by slot completeness rule later)
+    calendar_include_flag: FLAGS.yes,
+    calendar_reason_code: REASON_CODES.included,
+    // L2 — Trading Expectation layer (mapped from system_include/system_reason)
+    trading_expectation_flag: systemFlag,
+    trading_reason_code: systemReason,
+    // L3 — Metric Coverage layer (no auto-exclusion rules yet)
+    metric_coverage_flag: FLAGS.yes,
+    metric_reason_code: 'METRIC_COVERAGE_NOT_APPLIED',
+    source_value: null,
+    source_row_count: 0,
+    source_data_exists: FLAGS.no,
+    // L4 — CCM layer
     manual_include_flag: manualFlag,
-    effective_include_flag: effectiveFlag,
-    paired_slot_include_flag: FLAGS.yes,
-    final_include_flag: effectiveFlag,
-    mask_include_flag: effectiveFlag,
-    is_manual_override: normalizedOverride ? FLAGS.yes : FLAGS.no,
     manual_reason: normalizedOverride?.manual_reason || '',
-    system_reason_code: systemReason,
+    is_manual_override: normalizedOverride ? FLAGS.yes : FLAGS.no,
+    paired_slot_include_flag: FLAGS.yes,
+    paired_slot_reason_code: '',
+    final_include_flag: effectiveFlag,
     final_reason_code: baseReason,
+    mask_include_flag: effectiveFlag,
+    // Backward compatibility fields
+    system_include_flag: systemFlag,
+    effective_include_flag: effectiveFlag,
+    system_reason_code: systemReason,
+    // Store lifecycle
     store_trading_commencement_date: store.store_trading_commencement_date,
     store_closure_date: store.store_closure_date || null,
     current_period_start_date: currentPeriod.current_period_start_date,
@@ -182,6 +200,7 @@ function applyPairedSlotPropagation(rows) {
     return {
       ...row,
       paired_slot_include_flag: FLAGS.no,
+      paired_slot_reason_code: finalReason,
       final_include_flag: FLAGS.no,
       mask_include_flag: FLAGS.no,
       final_reason_code: finalReason
@@ -222,6 +241,8 @@ function applyUnpairedSlotExclusions(rows) {
 
     return {
       ...row,
+      calendar_include_flag: FLAGS.no,
+      calendar_reason_code: reasonCode,
       paired_slot_include_flag: FLAGS.no,
       final_include_flag: FLAGS.no,
       mask_include_flag: FLAGS.no,
