@@ -58,6 +58,15 @@ export function createApp(root) {
     selectedMetric: persistedUiState.selectedMetric || '',
     selectedMetrics: Array.isArray(persistedUiState.selectedMetrics) ? persistedUiState.selectedMetrics : [],
     selectedPeriodType: persistedUiState.selectedPeriodType || '',
+    draftScope: {
+      storeCode: persistedUiState.selectedStoreCode || '',
+      metrics: Array.isArray(persistedUiState.selectedMetrics) ? [...persistedUiState.selectedMetrics] : []
+    },
+    appliedScope: {
+      storeCode: persistedUiState.appliedScope?.storeCode || persistedUiState.selectedStoreCode || '',
+      metrics: Array.isArray(persistedUiState.appliedScope?.metrics) ? [...persistedUiState.appliedScope.metrics] : (Array.isArray(persistedUiState.selectedMetrics) ? [...persistedUiState.selectedMetrics] : [])
+    },
+    hasUnappliedScopeChanges: false,
     manualOverrides: [],
     diagnostics: {
       source: {
@@ -116,7 +125,18 @@ export function createApp(root) {
     stepCompletion: {
       mask: Boolean(persistedUiState.stepCompletion?.mask)
     },
-    validationSummary: persistedUiState.validationSummary || null
+    validationSummary: persistedUiState.validationSummary || null,
+    workingScope: {
+      status: 'idle',
+      maskPreviewRows: [],
+      maskRowCount: 0,
+      includedCount: 0,
+      excludedCount: 0,
+      loadedAt: '',
+      storeCodes: '',
+      metrics: ''
+    },
+    persistedMaskStatus: 'not_written'
   };
 
   installFormSubmitGuard();
@@ -229,14 +249,16 @@ export function createApp(root) {
 
   function renderScopeBar() {
     const context = state.l4lRows.length ? inferComparisonContext(state.l4lRows) : {};
+    const isLoaded = state.workingScope.status === 'ready';
+    const hasChanges = state.hasUnappliedScopeChanges;
     return `
       <section class="scope-bar" aria-label="Selected Scope">
         <div>
-          <span>Store</span>
+          <span>Store${hasChanges ? ' (draft)' : ''}</span>
           <strong>${escapeHtml(selectedStoreDisplay())}</strong>
         </div>
         <div>
-          <span>Metric</span>
+          <span>Metric${hasChanges ? ' (draft)' : ''}</span>
           <strong>${escapeHtml(selectedMetricDisplay())}</strong>
         </div>
         <div>
@@ -247,7 +269,8 @@ export function createApp(root) {
           <span>Comparison</span>
           <strong>${escapeHtml(context.period_label_current || 'Current')} vs ${escapeHtml(context.period_label_prior || 'Prior')}</strong>
         </div>
-        ${state.scopeDirty ? '<div class="scope-stale-chip">Stale scope</div>' : ''}
+        ${hasChanges ? '<div class="scope-stale-chip">Unapplied</div>' : ''}
+        ${isLoaded && !hasChanges ? `<div class="scope-loaded-chip">${escapeHtml(state.workingScope.maskRowCount)} rows</div>` : ''}
       </section>
     `;
   }
@@ -258,12 +281,30 @@ export function createApp(root) {
   }
 
   function renderStaleDataBanner() {
+    const ws = state.workingScope;
+    const hasChanges = state.hasUnappliedScopeChanges;
+
+    if (hasChanges) {
+      return `
+        <section class="stale-data-banner" role="status" aria-live="polite">
+          <div>
+            <strong>Scope changes not applied.</strong>
+            Click <strong>Apply Scope</strong> in the Selection panel to load working data.
+          </div>
+        </section>
+      `;
+    }
+
     if (!state.scopeDirty) return '';
+    const statusText = ws.status === 'ready'
+      ? `Working data: ${ws.maskRowCount} rows (${ws.includedCount} included, ${ws.excludedCount} excluded).`
+      : '';
     return `
       <section class="stale-data-banner" role="status" aria-live="polite">
         <div>
-          <strong>Scope changed.</strong>
-          Existing mask and L4L result context no longer match the current scope. Rebuild the mask below.
+          <strong>Persisted mask is stale.</strong>
+          ${escapeHtml(statusText)}
+          Navigate to Stage 4 to commit the updated mask.
         </div>
         <button type="button" class="primary compact" data-action="generate-mask">Rebuild Selected Scope Mask</button>
       </section>
@@ -678,10 +719,13 @@ export function createApp(root) {
 
   function renderSelectionControls() {
     const profile = state.sourceProfile;
+    const hasChanges = state.hasUnappliedScopeChanges;
+    const isLoaded = state.workingScope.status === 'ready';
     return `
       <section class="panel">
         <div class="panel-heading">
           <h2>Selection</h2>
+          ${hasChanges ? '<span class="scope-stale-chip">Unapplied</span>' : isLoaded ? '<span class="scope-loaded-chip">Loaded</span>' : ''}
         </div>
         ${profile ? `
           <div class="field-grid">
@@ -700,7 +744,15 @@ export function createApp(root) {
               </select>
             </label>
           </div>
-          <p class="note">Current selection: ${escapeHtml(selectedStoreDisplay())} / ${escapeHtml(selectedMetricDisplay())}. All six approved period types are generated automatically.</p>
+          <p class="note">Draft selection: ${escapeHtml(selectedStoreDisplay())} / ${escapeHtml(selectedMetricDisplay())}.</p>
+          ${isLoaded && !hasChanges ? `<p class="note success-message">Applied scope: ${escapeHtml(appliedStoreDisplay())} / ${escapeHtml(appliedMetricDisplay())}. ${escapeHtml(state.workingScope.maskRowCount)} CCM rows loaded.</p>` : ''}
+          ${hasChanges ? '<p class="note scope-draft-warning">Scope changes are not applied yet. Click <strong>Apply Scope</strong> to load CCM working data.</p>' : ''}
+          <div class="button-row">
+            <button type="button" class="primary compact" data-action="apply-scope" ${state.loading || !profile || (!hasChanges && isLoaded) ? 'disabled' : ''}>
+              ${state.loading ? 'Loading...' : 'Apply Scope'}
+            </button>
+          </div>
+          <p class="note">All six approved period types are generated automatically.</p>
         ` : emptyState('Load source data before selecting a scope.')}
       </section>
     `;
@@ -1602,6 +1654,7 @@ export function createApp(root) {
       render();
     });
     bindAll('save-overrides', 'click', saveOverrides);
+    bindAll('apply-scope', 'click', applyScope);
     bindAll('generate-mask', 'click', generateMask);
     bindAll('run-l4l-workflow', 'click', runL4LWorkflow);
     bindAll('refresh-l4l-results', 'click', refreshL4LResults);
@@ -1933,29 +1986,134 @@ export function createApp(root) {
     metrics = selectedMetricList()
   } = {}) {
     const nextMetrics = Array.isArray(metrics) && metrics.length ? metrics : [metric].filter(Boolean);
-    if (storeCode !== state.selectedStoreCode || nextMetrics.join('|') !== selectedMetricList().join('|')) {
-      markScopeChanged();
-      state.reviewConfirmed = false;
-    }
+    // Draft-only: no data loading. User must click "Apply Scope" to commit.
     state.selectedStoreCode = storeCode;
     state.selectedMetrics = nextMetrics;
     state.selectedMetric = nextMetrics[0] || '';
     state.periodPage = 1;
-    state.pendingWrite = null;
+    state.hasUnappliedScopeChanges = isScopeDraftDifferent();
+    state.status = 'Scope changed. Click Apply Scope to load working data.';
+    render();
+  }
+
+  async function applyScope() {
+    if (!state.hasUnappliedScopeChanges && state.workingScope.status === 'ready') {
+      state.status = 'Working scope data is already loaded.';
+      render();
+      return;
+    }
+
+    // Copy draft to applied
+    state.appliedScope.storeCode = state.selectedStoreCode;
+    state.appliedScope.metrics = [...selectedMetricList()];
+    state.hasUnappliedScopeChanges = false;
+    state.reviewConfirmed = false;
+    state.scopeDirty = true;
+    state.persistedMaskStatus = 'stale';
     invalidateScopeCache();
+
+    // Show progress modal
     state.loading = true;
-    state.status = 'Loading manual coverage adjustments for selected Store and Metric...';
+    state.executionModal = {
+      type: 'apply-scope',
+      status: 'running',
+      currentStage: 0,
+      message: 'Loading working data for the selected scope...'
+    };
+    state.status = 'Loading CCM working data...';
     render();
 
+    // Progress steps
+    const steps = [
+      'Applying selected scope',
+      'Loading source records',
+      'Loading manual overrides',
+      'Generating period windows',
+      'Building CCM preview rows',
+      'Preparing review data'
+    ];
+
     try {
+      // Step 1-2: scope applied + source ready
+      updateModalProgress(1, steps);
+      await new Promise(r => setTimeout(r, 100));
+
+      // Step 3: load overrides
+      updateModalProgress(2, steps);
       state.manualOverrides = await loadOverridesForSelection();
-      state.status = `Loaded manual coverage adjustments for ${selectedStoreDisplay()} / ${selectedMetricDisplay()}.`;
-      state.error = '';
-    } catch (error) {
-      state.error = readableError(error);
+
+      // Step 4-5: generate working data
+      updateModalProgress(3, steps);
+      await new Promise(r => setTimeout(r, 50));
+      updateModalProgress(4, steps);
+
+      const periodRows = allPeriodRowsForGeneration();
+      const maskRows = generateMaskRows({
+        stores: selectedStores(),
+        metrics: appliedMetricList(),
+        periodRows,
+        manualOverrides: state.manualOverrides,
+        runId: 'working',
+        generatedAt: new Date().toISOString(),
+        generationMode: 'SELECTED_SCOPE',
+        outputCollection: COLLECTIONS.selectedScopeMask
+      });
+
+      state.workingScope = {
+        status: 'ready',
+        _key: workingScopeKey(),
+        maskPreviewRows: maskRows,
+        maskRowCount: maskRows.length,
+        includedCount: maskRows.filter((r) => r.mask_include_flag === FLAGS.yes).length,
+        excludedCount: maskRows.filter((r) => r.mask_include_flag === FLAGS.no).length,
+        loadedAt: new Date().toISOString(),
+        storeCodes: state.appliedScope.storeCode,
+        metrics: state.appliedScope.metrics.join(', ')
+      };
+
+      // Step 5-6: complete
+      updateModalProgress(5, steps);
+      await new Promise(r => setTimeout(r, 50));
+      updateModalProgress(6, steps);
+
+      state.executionModal = {
+        type: 'apply-scope',
+        status: 'success',
+        currentStage: 6,
+        message: 'Working data loaded.',
+        resultSummary: `${maskRows.length} comparable week rows loaded (${state.workingScope.includedCount} included, ${state.workingScope.excludedCount} excluded).`
+      };
+      state.status = `Scope data loaded: ${state.workingScope.maskRowCount} rows ready.`;
+
+      // Auto-close after success
+      setTimeout(() => {
+        if (state.executionModal?.type === 'apply-scope' && state.executionModal?.status === 'success') {
+          state.executionModal = null;
+          render();
+        }
+      }, 1200);
+
+    } catch (err) {
+      state.workingScope.status = 'error';
+      state.executionModal = {
+        type: 'apply-scope',
+        status: 'error',
+        currentStage: 0,
+        message: 'Failed to load working data.',
+        errorMessage: readableError(err)
+      };
+      state.status = 'Scope data load failed.';
     } finally {
       state.loading = false;
       render();
+    }
+  }
+
+  function updateModalProgress(stage, steps) {
+    if (state.executionModal?.type === 'apply-scope') {
+      state.executionModal.currentStage = stage;
+      state.executionModal.message = steps[stage - 1] || steps[steps.length - 1];
+      state.executionModal.stages = steps;
     }
   }
 
@@ -2276,11 +2434,31 @@ export function createApp(root) {
     return (state.sourceProfile?.stores || []).find((store) => store.store_code === state.selectedStoreCode) || null;
   }
 
+  // ── Applied scope (used for generation, mask compute, AppDB write) ──
+
+  function appliedStoreCode() {
+    return state.appliedScope?.storeCode || state.selectedStoreCode || '';
+  }
+
+  function appliedMetricList() {
+    const metrics = (Array.isArray(state.appliedScope?.metrics) && state.appliedScope.metrics.length)
+      ? state.appliedScope.metrics
+      : selectedMetricList();
+    if (metrics.includes(ALL_METRICS_VALUE)) {
+      return (state.sourceProfile?.metrics || []).map((item) => item.metric).filter(Boolean);
+    }
+    return metrics;
+  }
+
   function selectedStores() {
     const stores = state.sourceProfile?.stores || [];
-    if (state.selectedStoreCode === ALL_STORES_VALUE) return stores;
-    return selectedStore() ? [selectedStore()] : [];
+    const code = appliedStoreCode();
+    if (code === ALL_STORES_VALUE) return stores;
+    const store = storeByCode(code);
+    return store ? [store] : [];
   }
+
+  // ── Draft scope (shown in selectors, not yet applied) ──
 
   function selectedStoreDisplay() {
     if (state.selectedStoreCode === ALL_STORES_VALUE) return 'All Stores';
@@ -2294,8 +2472,14 @@ export function createApp(root) {
   }
 
   function selectedScopeSummaryStore() {
-    if (state.selectedStoreCode !== ALL_STORES_VALUE) return selectedStore();
+    const code = appliedStoreCode();
+    if (code !== ALL_STORES_VALUE) return storeByCode(code);
     return { store_code: 'All Stores', store_name: 'All Stores', region: '', store_trading_commencement_date: 'MULTI', store_closure_date: '' };
+  }
+
+  function storeByCode(code) {
+    if (!code || code === ALL_STORES_VALUE) return null;
+    return (state.sourceProfile?.stores || []).find((s) => s.store_code === code) || null;
   }
 
   function selectedMetricList() {
@@ -2316,9 +2500,23 @@ export function createApp(root) {
     return `${metrics.length} metrics selected`;
   }
 
-  function selectedMetricValueForRun() {
-    const metrics = selectedMetricList();
-    return metrics.length <= 3 ? metrics.join(', ') : `${metrics.length} metrics selected`;
+  function appliedStoreDisplay() {
+    const code = appliedStoreCode();
+    if (code === ALL_STORES_VALUE) return 'All Stores';
+    const store = storeByCode(code);
+    return store ? `${store.store_code} - ${store.store_name || 'Unknown'}` : '-';
+  }
+
+  function appliedMetricDisplay() {
+    const metrics = appliedMetricList();
+    if (!metrics.length) return '-';
+    if (metrics.length === 1) return metrics[0];
+    return `${metrics.length} metrics`;
+  }
+
+  function isScopeDraftDifferent() {
+    return state.selectedStoreCode !== state.appliedScope.storeCode
+      || selectedMetricList().join(',') !== (state.appliedScope.metrics || []).join(',');
   }
 
   function singleMetricSelection() {
@@ -2327,6 +2525,15 @@ export function createApp(root) {
 
   function singleOverrideScope() {
     return state.selectedStoreCode !== ALL_STORES_VALUE && Boolean(selectedStore()) && singleMetricSelection();
+  }
+
+  function scopeSelectionReady() {
+    return Boolean(state.selectedStoreCode && selectedMetricList().length);
+  }
+
+  function selectedMetricValueForRun() {
+    const metrics = appliedMetricList();
+    return metrics.length <= 3 ? metrics.join(', ') : `${metrics.length} metrics selected`;
   }
 
   function scopeSelectionReady() {
@@ -2356,10 +2563,20 @@ export function createApp(root) {
     ].join('|');
   }
 
+  function workingScopeKey() {
+    return [
+      state.appliedScope?.storeCode || state.selectedStoreCode,
+      (state.appliedScope?.metrics || selectedMetricList()).join(','),
+      state.periodRows.length,
+      state.sourceRows.length
+    ].join('|');
+  }
+
   function invalidateScopeCache() {
     _cachedSummary = null;
     _cachedReviewRows = null;
     _cacheKey = '';
+    if (state.workingScope) state.workingScope.status = 'stale';
   }
 
   function selectedScopeSummary() {
