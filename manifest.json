@@ -1,6 +1,6 @@
 {
   "name": "Forty Winks CCM",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "fullpage": true,
   "size": {
     "width": 6,
@@ -274,6 +274,54 @@
             "type": "STRING"
           },
           {
+            "name": "comparison_mode",
+            "type": "STRING"
+          },
+          {
+            "name": "comparison_window_id",
+            "type": "STRING"
+          },
+          {
+            "name": "calendar_include_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "calendar_reason_code",
+            "type": "STRING"
+          },
+          {
+            "name": "trading_expectation_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "trading_reason_code",
+            "type": "STRING"
+          },
+          {
+            "name": "metric_coverage_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "metric_reason_code",
+            "type": "STRING"
+          },
+          {
+            "name": "source_value",
+            "type": "LONG"
+          },
+          {
+            "name": "source_row_count",
+            "type": "LONG"
+          },
+          {
+            "name": "source_data_exists",
+            "type": "STRING"
+          },
+          {
+            "name": "paired_slot_reason_code",
+            "type": "STRING"
+          },
+          {
             "name": "system_include_flag",
             "type": "STRING"
           },
@@ -424,6 +472,54 @@
           },
           {
             "name": "financial_year",
+            "type": "STRING"
+          },
+          {
+            "name": "comparison_mode",
+            "type": "STRING"
+          },
+          {
+            "name": "comparison_window_id",
+            "type": "STRING"
+          },
+          {
+            "name": "calendar_include_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "calendar_reason_code",
+            "type": "STRING"
+          },
+          {
+            "name": "trading_expectation_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "trading_reason_code",
+            "type": "STRING"
+          },
+          {
+            "name": "metric_coverage_flag",
+            "type": "STRING"
+          },
+          {
+            "name": "metric_reason_code",
+            "type": "STRING"
+          },
+          {
+            "name": "source_value",
+            "type": "LONG"
+          },
+          {
+            "name": "source_row_count",
+            "type": "LONG"
+          },
+          {
+            "name": "source_data_exists",
+            "type": "STRING"
+          },
+          {
+            "name": "paired_slot_reason_code",
             "type": "STRING"
           },
           {
