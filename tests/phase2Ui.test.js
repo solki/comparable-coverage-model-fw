@@ -88,7 +88,7 @@ test('HCI redesign exposes command center, active workspace, result board, and e
   for (const marker of [
     'Command Center',
     'Next best action',
-    'Scope changed',
+    'Applied scope',
     'layer-workspace',
     'Result Board',
     'comparison-scorecards',
